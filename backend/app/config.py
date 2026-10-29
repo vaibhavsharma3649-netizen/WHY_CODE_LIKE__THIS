@@ -51,6 +51,7 @@ class Settings:
             if o.strip()
         ]
     )
+    cors_origin_regex: str = _env("WHYCODE_CORS_ORIGIN_REGEX")
 
     @property
     def llm_enabled(self) -> bool:
