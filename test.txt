@@ -1,0 +1,7 @@
+echo "# WHY_CODE_LIKE__THIS" >> README.md
+git init
+git add README.md
+git commit -m "first commit"
+git branch -M main
+git remote add origin https://github.com/vaibhavsharma3649-netizen/WHY_CODE_LIKE__THIS.git
+git push -u origin main
