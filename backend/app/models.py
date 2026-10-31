@@ -31,10 +31,22 @@ class MeResponse(BaseModel):
     active_org: MembershipOut
 
 
+class AskTurn(BaseModel):
+    question: str = Field(max_length=2000)
+    answer: str = Field(default="", max_length=8000)
+    path: str | None = None
+    line_start: int | None = None
+    line_end: int | None = None
+
+
 class AskRequest(BaseModel):
     repo_id: str
     question: str = Field(min_length=2, max_length=2000)
     mode: Literal["auto", "understand", "why", "security", "handover"] = "auto"
+    history: list[AskTurn] = Field(default_factory=list, max_length=12)
+    focus_path: str | None = None
+    focus_line_start: int | None = None
+    focus_line_end: int | None = None
 
 
 class Citation(BaseModel):
@@ -49,6 +61,8 @@ class Citation(BaseModel):
     commit_sha: str | None = None
     label: str = "fact"
     score: float | None = None
+    code: str | None = None
+    language: str | None = None
 
 
 class AskResponse(BaseModel):
@@ -61,6 +75,7 @@ class AskResponse(BaseModel):
     timings: dict[str, float]
     audit_id: str | None = None
     indexed_sha: str | None = None
+    engine: str | None = None
 
 
 class HandoverSource(BaseModel):

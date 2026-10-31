@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { ChevronDown, LogOut, RefreshCw, RotateCw } from "lucide-react";
 import { Mark } from "./Mark";
 import { useAuth } from "../auth";
-import { NAV, type PageKey } from "../nav";
+import { navForRole, type PageKey } from "../nav";
 import { Pill } from "./ui";
 import { refreshRepo, shortSha } from "../api";
 import { errorText, useToast } from "../hooks";
@@ -38,6 +38,11 @@ export function Layout({
   const [refreshing, setRefreshing] = useState(false);
   const [toast, setToast] = useToast();
   const canRefresh = role === "admin" || role === "maintainer";
+  const nav = navForRole(role);
+  const primaryPage: PageKey =
+    role === "security_reviewer" ? "security" : role === "developer" ? "ask" : "ask";
+  const primaryLabel =
+    role === "security_reviewer" ? "Review security" : role === "developer" ? "Ask the code" : "Ask the repo";
 
   const onRefresh = async () => {
     if (!repoId) return;
@@ -64,8 +69,14 @@ export function Layout({
         </button>
 
         <nav className="nav-group" aria-label="Workspace">
-          <span className="nav-label">Workspace</span>
-          {NAV.map((item) => {
+          <span className="nav-label">
+            {role === "security_reviewer"
+              ? "Security workspace"
+              : role === "developer"
+                ? "Engineering workspace"
+                : "Workspace"}
+          </span>
+          {nav.map((item) => {
             const Icon = item.icon;
             return (
               <button
@@ -165,8 +176,8 @@ export function Layout({
               </button>
             ) : null}
             <span className="role-chip">{role ? ROLE_LABEL[role] : ""}</span>
-            <button type="button" className="btn btn-primary btn-sm" onClick={() => onNavigate("ask")}>
-              Ask the repo
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => onNavigate(primaryPage)}>
+              {primaryLabel}
             </button>
           </div>
         </header>

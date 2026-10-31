@@ -36,6 +36,34 @@ const STATUS_TONE: Record<string, string> = {
   complete: "neutral",
 };
 
+const ROLE_PRESETS: Record<string, { intro: string; title: string; goal: string }> = {
+  security_reviewer: {
+    intro: "Security tasks start with findings, then trace the affected code and linked rationale.",
+    title: "Review security findings",
+    goal: "Find the security findings in this repository, identify the affected files, and explain any linked rationale.",
+  },
+  developer: {
+    intro: "Developer tasks start with the code path, then pull in decisions and surrounding context.",
+    title: "Trace code and context",
+    goal: "Find the relevant code, explain how it works, and surface the decisions or history that affect a change.",
+  },
+  maintainer: {
+    intro: "Maintainer tasks start with recorded decisions, then check the code they affect.",
+    title: "Review decisions and impact",
+    goal: "Review the recorded decisions, find the code they affect, and identify what a maintainer should verify.",
+  },
+  admin: {
+    intro: "Admin tasks inspect durable state, source coverage, and the evidence boundary behind answers.",
+    title: "Audit repository memory",
+    goal: "Inspect the repository memory, its source coverage, and the context persisted for agent runs.",
+  },
+  reader: {
+    intro: "Read-only tasks can be inspected but not created or advanced.",
+    title: "Inspect repository memory",
+    goal: "Inspect the evidence and handover context without changing repository state.",
+  },
+};
+
 function toCitation(item: Record<string, unknown>, index: number): Citation {
   const id =
     (item.id as string) ||
@@ -69,6 +97,7 @@ function toCitation(item: Record<string, unknown>, index: number): Citation {
 export function Agent() {
   const { repoId, role } = useAuth();
   const canOperate = role !== "reader" && role !== null;
+  const preset = ROLE_PRESETS[role ?? "developer"];
 
   const [tasks, setTasks] = useState<Array<{ task: AgentTask; run_count: number }>>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -139,6 +168,15 @@ export function Agent() {
 
   const selectedTask = tasks.find((item) => item.task.task_id === selectedTaskId)?.task ?? run?.task ?? null;
 
+  const openForm = () => {
+    const next = !showForm;
+    setShowForm(next);
+    if (next && !title.trim() && !goal.trim()) {
+      setTitle(preset.title);
+      setGoal(preset.goal);
+    }
+  };
+
   const onCreateTask = async () => {
     if (!repoId || title.trim().length < 2) return;
     setBusy("create");
@@ -195,15 +233,14 @@ export function Agent() {
     <div className="page">
       <header className="page-head">
         <div>
-          <p className="eyebrow">Persistent working state</p>
-          <h1>Agent memory</h1>
-          <p className="sub">
-            A task survives process restarts because its plan, steps, and context live in Neo4j. On resume,
-            the run revalidates the revision it last saw.
+          <p className="eyebrow">
+            {role === "security_reviewer" ? "Security review agent" : "Persistent working state"}
           </p>
+          <h1>{role === "security_reviewer" ? "Security review memory" : "Agent memory"}</h1>
+          <p className="sub">{preset.intro} On resume, the run revalidates the revision it last saw.</p>
         </div>
         <div className="head-actions">
-          <button type="button" className="btn btn-primary" onClick={() => setShowForm((value) => !value)} disabled={!canOperate}>
+          <button type="button" className="btn btn-primary" onClick={openForm} disabled={!canOperate}>
             <Plus size={15} />
             New task
           </button>
@@ -220,6 +257,20 @@ export function Agent() {
       {showForm ? (
         <section className="card task-form">
           <SectionLabel>Create a task</SectionLabel>
+          <div className="agent-preset-row">
+            <button
+              type="button"
+              className="agent-preset"
+              onClick={() => {
+                setTitle(preset.title);
+                setGoal(preset.goal);
+              }}
+            >
+              <ShieldCheck size={13} />
+              Use {role === "security_reviewer" ? "security" : "role"} preset
+            </button>
+            <span>{preset.goal}</span>
+          </div>
           <div className="form-grid">
             <label>
               Title

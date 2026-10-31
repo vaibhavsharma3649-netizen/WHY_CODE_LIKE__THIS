@@ -48,6 +48,16 @@ export interface Citation {
   commit_sha?: string | null;
   label: string;
   score?: number | null;
+  code?: string | null;
+  language?: string | null;
+}
+
+export interface AskTurn {
+  question: string;
+  answer: string;
+  path?: string | null;
+  line_start?: number | null;
+  line_end?: number | null;
 }
 
 export interface AskResult {
@@ -195,6 +205,7 @@ export interface AgentTask {
   current_step: string;
   summary: string;
   repo_id: string;
+  owner_role?: string | null;
   created_at: string;
 }
 

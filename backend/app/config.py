@@ -11,7 +11,10 @@ load_dotenv(ROOT / ".env")
 
 
 def _env(name: str, default: str = "") -> str:
-    return os.getenv(name, default).strip()
+    value = os.getenv(name, default).strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1].strip()
+    return value
 
 
 def _int(name: str, default: int) -> int:
@@ -32,7 +35,7 @@ class Settings:
     token_ttl_minutes: int = _int("WHYCODE_TOKEN_TTL_MINUTES", 720)
     github_token: str = _env("GITHUB_TOKEN")
     github_api: str = _env("GITHUB_API", "https://api.github.com")
-    groq_key: str = _env("GROQ_API_KEY")
+    groq_key: str = _env("GROQ_API_KEY").removeprefix("Bearer ").strip()
     groq_model: str = _env("GROQ_MODEL", "llama-3.3-70b-versatile")
     llm_mode: str = _env("WHYCODE_LLM_MODE", "auto")
     embedding_model: str = _env("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")

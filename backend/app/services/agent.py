@@ -27,7 +27,14 @@ def _run_id() -> str:
     return f"run_{uuid.uuid4().hex[:12]}"
 
 
-def create_task(org_id: str, repo_id: str, actor_id: str, title: str, goal: str) -> dict[str, Any]:
+def create_task(
+    org_id: str,
+    repo_id: str,
+    actor_id: str,
+    title: str,
+    goal: str,
+    role: str = "developer",
+) -> dict[str, Any]:
     task_id = _task_id()
     db.write(
         """
@@ -35,7 +42,8 @@ def create_task(org_id: str, repo_id: str, actor_id: str, title: str, goal: str)
         MERGE (t:Task {task_id: $task})
         SET t.org_id = $org, t.repo_id = $repo, t.title = $title, t.goal = $goal,
             t.status = 'open', t.current_step = 'created', t.summary = $goal,
-            t.owner_id = $actor, t.created_at = $now, t.updated_at = $now
+            t.owner_id = $actor, t.owner_role = $role,
+            t.created_at = $now, t.updated_at = $now
         MERGE (t)-[:WORKS_ON]->(r)
         """,
         {
@@ -45,6 +53,7 @@ def create_task(org_id: str, repo_id: str, actor_id: str, title: str, goal: str)
             "title": title[:240],
             "goal": goal[:1000],
             "actor": actor_id,
+            "role": role,
             "now": _now(),
         },
     )
@@ -320,10 +329,23 @@ class AgentState(TypedDict, total=False):
     summary: str
 
 
-def _choose_tool(goal: str) -> tuple[str, dict[str, Any]]:
+def _choose_tool(
+    goal: str, role: str = "developer", steps: list[dict[str, Any]] | None = None
+) -> tuple[str, dict[str, Any]]:
     lowered = (goal or "").lower()
+    steps = steps or []
+    used = {str(step.get("tool")) for step in steps}
+    if role == "security_reviewer":
+        if "get_findings" not in used:
+            return "get_findings", {}
+        return "search_code", {
+            "query": goal or "security sensitive session code",
+            "limit": 5,
+        }
     if any(w in lowered for w in ("security", "finding", "vulnerab", "risk")):
         return "get_findings", {}
+    if role == "maintainer" and "get_decisions" not in used:
+        return "get_decisions", {}
     if any(w in lowered for w in ("why", "decision", "rationale", "history")):
         return "get_decisions", {}
     if any(w in lowered for w in ("setup", "onboard", "handover", "architecture")):
@@ -336,8 +358,10 @@ def _build_graph():
         run = get_run(state["org_id"], state["repo_id"], state["run_id"])
         if not run:
             raise ValueError("run not found")
-        goal = (run.get("task") or {}).get("goal") or (run.get("task") or {}).get("title") or ""
-        tool, args = _choose_tool(goal)
+        task = run.get("task") or {}
+        goal = task.get("goal") or task.get("title") or ""
+        role = task.get("owner_role") or "developer"
+        tool, args = _choose_tool(goal, role, run["run"].get("steps") or [])
         return {**state, "tool": tool, "args": args, "summary": goal}
 
     def act(state: AgentState) -> AgentState:

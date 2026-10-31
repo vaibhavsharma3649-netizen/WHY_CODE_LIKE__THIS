@@ -148,9 +148,36 @@ def _chunk_candidates(org: str, repo: str, question: str) -> dict[str, dict[str,
     return {c["chunk_id"]: c for c in ordered[:12]}
 
 
+def _entity_code(org: str, repo: str, entity: dict[str, Any]) -> dict[str, str] | None:
+    path = entity.get("path")
+    if not path:
+        return None
+    row = db.read_one(
+        """
+        MATCH (c:CodeChunk {org_id: $org, repo_id: $repo, path: $path})
+        WHERE c.line_end >= coalesce($start, c.line_start)
+          AND c.line_start <= coalesce($end, c.line_end)
+        RETURN c.content_excerpt AS code, c.language AS language
+        ORDER BY abs(c.line_start - coalesce($start, c.line_start))
+        LIMIT 1
+        """,
+        {
+            "org": org,
+            "repo": repo,
+            "path": path,
+            "start": entity.get("line_start"),
+            "end": entity.get("line_end"),
+        },
+    )
+    if not row or not row.get("code"):
+        return None
+    return {"code": str(row["code"])[:6000], "language": row.get("language") or "text"}
+
+
 def _evidence_from_entity(org: str, repo: str, e: dict[str, Any], score: float, label: str = "fact") -> dict[str, Any]:
     doc = (e.get("docstring") or "").strip().replace("\n", " ")
     snippet = doc[:280] if doc else f"{e.get('kind')} `{e.get('qualified_name')}`"
+    code = _entity_code(org, repo, e)
     return {
         "kind": "code",
         "title": e.get("qualified_name") or e.get("name"),
@@ -164,7 +191,24 @@ def _evidence_from_entity(org: str, repo: str, e: dict[str, Any], score: float, 
         "node_id": e.get("entity_id"),
         "label": label,
         "score": round(score, 4),
+        **({"code": code["code"], "language": code["language"]} if code else {}),
     }
+
+
+def _focused_chunks(
+    org: str, repo: str, path: str, line: int | None, limit: int = 3
+) -> list[dict[str, Any]]:
+    rows = db.read(
+        """
+        MATCH (c:CodeChunk {org_id: $org, repo_id: $repo, path: $path})
+        WHERE $line IS NULL OR (c.line_end >= $line - 18 AND c.line_start <= $line + 18)
+        RETURN c {.*} AS c
+        ORDER BY abs(c.line_start - coalesce($line, c.line_start)), c.line_start
+        LIMIT $limit
+        """,
+        {"org": org, "repo": repo, "path": path, "line": line, "limit": limit},
+    )
+    return [row["c"] for row in rows]
 
 
 def _decision_evidence(row: dict[str, Any], score: float = 0.0) -> dict[str, Any]:
@@ -290,7 +334,12 @@ def _graph_expansion(org: str, repo: str, entity_ids: list[str], paths: list[str
 
 
 def retrieve(
-    org_id: str, repo_id: str, question: str, mode: str = "auto", limit: int = 8
+    org_id: str,
+    repo_id: str,
+    question: str,
+    mode: str = "auto",
+    limit: int = 8,
+    focus: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     resolved_mode = classify(question) if mode == "auto" else mode
@@ -313,6 +362,27 @@ def retrieve(
     top_chunks = list(chunks.values())[:6]
 
     evidence: list[dict[str, Any]] = []
+    focus_path = (focus or {}).get("path")
+    focus_line = (focus or {}).get("line_start")
+    if focus_path:
+        for c in _focused_chunks(org_id, repo_id, str(focus_path), focus_line):
+            evidence.append(
+                {
+                    "kind": "code",
+                    "title": c.get("path") or "focused source",
+                    "snippet": (c.get("content_excerpt") or "")[:480],
+                    "code": (c.get("content_excerpt") or "")[:6000],
+                    "language": c.get("language") or "text",
+                    "url": c.get("source_url"),
+                    "path": c.get("path"),
+                    "line_start": c.get("line_start"),
+                    "line_end": c.get("line_end"),
+                    "commit_sha": c.get("commit_sha"),
+                    "node_id": c.get("chunk_id"),
+                    "label": "fact",
+                    "score": 1.0,
+                }
+            )
     for e in ranked_entities:
         evidence.append(
             _evidence_from_entity(org_id, repo_id, e, entity_scores.get(e["entity_id"], 0.1))
@@ -323,6 +393,8 @@ def retrieve(
                 "kind": "code",
                 "title": c.get("path") or "source excerpt",
                 "snippet": (c.get("content_excerpt") or "")[:480],
+                "code": (c.get("content_excerpt") or "")[:6000],
+                "language": c.get("language") or "text",
                 "url": c.get("source_url"),
                 "path": c.get("path"),
                 "line_start": c.get("line_start"),
@@ -355,6 +427,8 @@ def retrieve(
 
     def priority(item: dict[str, Any]) -> float:
         base = float(item.get("score") or 0.0)
+        if focus_path and item.get("path") == focus_path:
+            base += 3.0
         if resolved_mode == "why" and item["kind"] == "decision":
             base += 2.0
         if resolved_mode == "security" and item["kind"] == "finding":
@@ -387,6 +461,8 @@ def retrieve(
                 if item["kind"] != "decision" and item.get("path") in exact_paths
             ]
         strong = set(strong_paths)
+        if focus_path:
+            strong.add(str(focus_path))
         focused = [
             item
             for item in deduped

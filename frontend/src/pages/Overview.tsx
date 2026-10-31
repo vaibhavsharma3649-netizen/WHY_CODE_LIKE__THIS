@@ -26,6 +26,60 @@ const ROLE_LABEL: Record<string, string> = {
   reader: "Reader",
 };
 
+const ROLE_BRIEF: Record<string, { eyebrow: string; title: string; body: string; page: PageKey; action: string }> = {
+  security_reviewer: {
+    eyebrow: "Security workspace",
+    title: "Start with the findings that have a history.",
+    body: "Review scanner signals, the code they land on, and the recorded rationale that explains why the code looks this way.",
+    page: "security",
+    action: "Review security signals",
+  },
+  developer: {
+    eyebrow: "Engineering workspace",
+    title: "Start with the code and ask why.",
+    body: "Keep the conversation and the source side by side. Follow-ups stay grounded in the same indexed revision.",
+    page: "ask",
+    action: "Ask the code",
+  },
+  maintainer: {
+    eyebrow: "Maintainer workspace",
+    title: "See what changed, and what it depends on.",
+    body: "Recent activity, decisions, and handover context are prioritized so changes do not silently break recorded intent.",
+    page: "ask",
+    action: "Ask about history",
+  },
+  admin: {
+    eyebrow: "Admin workspace",
+    title: "Keep the memory trustworthy.",
+    body: "Inspect repository state, persistent agent tasks, and the evidence boundaries behind every answer.",
+    page: "agent",
+    action: "Inspect agent memory",
+  },
+  reader: {
+    eyebrow: "Read-only workspace",
+    title: "Read the memory without changing it.",
+    body: "Browse evidence, handover context, and security signals. Writes and agent runs stay blocked for this role.",
+    page: "handover",
+    action: "Read the handover",
+  },
+};
+
+const STAT_ORDER: Record<string, string[]> = {
+  security_reviewer: ["Findings", "Files", "Code entities", "Decisions"],
+  developer: ["Files", "Code entities", "Decisions", "Findings"],
+  maintainer: ["Decisions", "Findings", "Files", "Code entities"],
+  admin: ["Files", "Decisions", "Findings", "Code entities"],
+  reader: ["Files", "Code entities", "Decisions", "Findings"],
+};
+
+const EXPLORE_ORDER: Record<string, PageKey[]> = {
+  security_reviewer: ["security", "ask", "agent", "handover"],
+  developer: ["ask", "handover", "security", "agent"],
+  maintainer: ["ask", "handover", "security", "agent"],
+  admin: ["agent", "ask", "security", "handover"],
+  reader: ["handover", "ask", "security", "agent"],
+};
+
 export function Overview({ onNavigate }: { onNavigate: (page: PageKey) => void }) {
   const { repoId, org, role } = useAuth();
   const state = useAsync(
@@ -60,6 +114,12 @@ export function Overview({ onNavigate }: { onNavigate: (page: PageKey) => void }
     { label: "Decisions", value: counts.decisions ?? 0, icon: Scale, tone: "amber", note: "with quoted evidence" },
     { label: "Findings", value: counts.findings ?? 0, icon: ShieldAlert, tone: "red", note: "scanner signals" },
   ];
+  const roleKey = role ?? "reader";
+  const brief = ROLE_BRIEF[roleKey];
+  const statRank = STAT_ORDER[roleKey] ?? [];
+  const orderedStats = [...stats].sort(
+    (a, b) => statRank.indexOf(a.label) - statRank.indexOf(b.label),
+  );
 
   const explore: Array<{ page: PageKey; title: string; body: string; icon: typeof MessageSquareText }> = [
     { page: "ask", title: "Ask the repository", body: "Grounded answers with citations, or an explicit abstention.", icon: MessageSquareText },
@@ -67,6 +127,10 @@ export function Overview({ onNavigate }: { onNavigate: (page: PageKey) => void }
     { page: "security", title: "Review security signals", body: "Bandit findings linked to the decisions that explain them.", icon: ShieldAlert },
     { page: "agent", title: "Inspect agent memory", body: "Persistent task state that revalidates against the indexed SHA.", icon: Bot },
   ];
+  const exploreRank = EXPLORE_ORDER[roleKey] ?? [];
+  const orderedExplore = [...explore].sort(
+    (a, b) => exploreRank.indexOf(a.page) - exploreRank.indexOf(b.page),
+  );
 
   return (
     <div className="page">
@@ -89,15 +153,26 @@ export function Overview({ onNavigate }: { onNavigate: (page: PageKey) => void }
           </div>
         </div>
         <div className="head-actions">
-          <button type="button" className="btn btn-primary" onClick={() => onNavigate("ask")}>
-            <MessageSquareText size={15} />
-            Ask the repo
+          <button type="button" className="btn btn-primary" onClick={() => onNavigate(brief.page)}>
+            {brief.page === "security" ? <ShieldAlert size={15} /> : <MessageSquareText size={15} />}
+            {brief.action}
           </button>
         </div>
       </header>
 
+      <section className={`role-brief role-brief-${roleKey}`}>
+        <div>
+          <span className="role-brief-eyebrow">{brief.eyebrow}</span>
+          <h2>{brief.title}</h2>
+          <p>{brief.body}</p>
+        </div>
+        <button type="button" className="btn btn-soft btn-sm" onClick={() => onNavigate(brief.page)}>
+          {brief.action} <ArrowUpRight size={13} />
+        </button>
+      </section>
+
       <div className="stat-grid">
-        {stats.map((stat) => {
+        {orderedStats.map((stat) => {
           const Icon = stat.icon;
           return (
             <div key={stat.label} className={`stat-card stat-${stat.tone}`}>
@@ -226,7 +301,11 @@ export function Overview({ onNavigate }: { onNavigate: (page: PageKey) => void }
               </li>
               <li>
                 <Check size={13} />
-                {role === "reader" ? "Read-only: refresh and agent writes are blocked" : "Role-gated writes are enforced per request"}
+                {role === "reader"
+                  ? "Read-only: refresh and agent writes are blocked"
+                  : role === "security_reviewer"
+                    ? "Security workspace: findings and affected code are prioritized"
+                    : "Role-gated writes are enforced per request"}
               </li>
             </ul>
           </section>
@@ -236,7 +315,7 @@ export function Overview({ onNavigate }: { onNavigate: (page: PageKey) => void }
       <section className="explore">
         <SectionLabel>Explore the memory</SectionLabel>
         <div className="explore-grid">
-          {explore.map((item) => {
+          {orderedExplore.map((item) => {
             const Icon = item.icon;
             return (
               <button key={item.page} type="button" className="explore-card" onClick={() => onNavigate(item.page)}>

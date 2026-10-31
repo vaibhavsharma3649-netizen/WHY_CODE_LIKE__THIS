@@ -13,8 +13,33 @@ import {
   ShieldAlert,
   ClipboardList,
 } from "lucide-react";
+import type { Role } from "./types";
 
 export type PageKey = "overview" | "ask" | "handover" | "security" | "agent" | "graph";
+
+export const ROLE_LABEL: Record<Role, string> = {
+  admin: "Admin",
+  maintainer: "Maintainer",
+  developer: "Developer",
+  security_reviewer: "Security reviewer",
+  reader: "Reader",
+};
+
+export const ROLE_HOME: Record<Role, PageKey> = {
+  admin: "overview",
+  maintainer: "overview",
+  developer: "ask",
+  security_reviewer: "security",
+  reader: "overview",
+};
+
+const ROLE_NAV: Record<Role, PageKey[]> = {
+  admin: ["overview", "agent", "ask", "handover", "security", "graph"],
+  maintainer: ["overview", "ask", "handover", "security", "agent", "graph"],
+  developer: ["ask", "handover", "overview", "graph", "security", "agent"],
+  security_reviewer: ["security", "ask", "agent", "graph", "handover", "overview"],
+  reader: ["overview", "ask", "handover", "security", "graph", "agent"],
+};
 
 export interface NavItem {
   key: PageKey;
@@ -31,6 +56,15 @@ export const NAV: NavItem[] = [
   { key: "agent", label: "Agent", icon: Bot, hint: "Persistent, resumable context" },
   { key: "graph", label: "Graph", icon: Network, hint: "The memory structure" },
 ];
+
+export function navForRole(role: Role | null): NavItem[] {
+  const order = ROLE_NAV[role ?? "reader"];
+  const byKey = new Map(NAV.map((item) => [item.key, item]));
+  return order.flatMap((key) => {
+    const item = byKey.get(key);
+    return item ? [item] : [];
+  });
+}
 
 export interface KindMeta {
   label: string;

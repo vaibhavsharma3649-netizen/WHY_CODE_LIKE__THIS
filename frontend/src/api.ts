@@ -1,6 +1,7 @@
 import type {
   AgentTask,
   AskResult,
+  AskTurn,
   Citation,
   Finding,
   GraphResponse,
@@ -149,16 +150,38 @@ function parseEvent(raw: string): { event: string; data: unknown } | null {
   }
 }
 
+export interface AskFocus {
+  path?: string | null;
+  line_start?: number | null;
+  line_end?: number | null;
+}
+
 export async function askStream(
   repoId: string,
   question: string,
   handlers: StreamHandlers,
   signal?: AbortSignal,
+  history: AskTurn[] = [],
+  focus?: AskFocus | null,
 ): Promise<void> {
   const response = await fetch(`${API_BASE}/ask/stream`, {
     method: "POST",
     headers: headers(),
-    body: JSON.stringify({ repo_id: repoId, question, mode: "auto" }),
+    body: JSON.stringify({
+      repo_id: repoId,
+      question,
+      mode: "auto",
+      history: history.map((turn) => ({
+        question: turn.question,
+        answer: turn.answer,
+        path: turn.path ?? null,
+        line_start: turn.line_start ?? null,
+        line_end: turn.line_end ?? null,
+      })),
+      focus_path: focus?.path ?? null,
+      focus_line_start: focus?.line_start ?? null,
+      focus_line_end: focus?.line_end ?? null,
+    }),
     signal,
   });
   if (!response.ok || !response.body) {

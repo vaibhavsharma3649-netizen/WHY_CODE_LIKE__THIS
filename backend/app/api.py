@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any, Iterator
 
@@ -8,6 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from fastapi.responses import StreamingResponse
 
 from . import audit, db
+from .config import settings
 from .auth import (
     Principal,
     create_token,
@@ -57,11 +59,16 @@ def _memberships(principal_row: dict[str, Any]) -> list[dict[str, Any]]:
 
 @router.get("/health")
 def health() -> dict[str, Any]:
+    llm = {
+        "enabled": settings.llm_enabled,
+        "mode": settings.llm_mode,
+        "model": settings.groq_model if settings.groq_key else None,
+    }
     try:
         version = db.ping()
     except Exception as exc:
-        return {"status": "degraded", "database": str(exc)[:200]}
-    return {"status": "ok", "database": version}
+        return {"status": "degraded", "database": str(exc)[:200], "llm": llm}
+    return {"status": "ok", "database": version, "llm": llm}
 
 
 @router.post("/auth/login", response_model=TokenResponse)
@@ -218,24 +225,70 @@ def _citation(item: dict[str, Any]) -> dict[str, Any]:
         "commit_sha": item.get("commit_sha"),
         "label": item.get("label") or "fact",
         "score": item.get("score"),
+        "code": item.get("code"),
+        "language": item.get("language"),
+    }
+
+
+def _retrieval_question(question: str, history: list[Any], has_focus: bool = False) -> str:
+    if not history:
+        return question
+    lowered = question.strip().lower()
+    if has_focus and lowered.startswith(
+        ("what does", "what is", "how does", "explain", "show ", "where is")
+    ):
+        return question
+    words = re.findall(r"[A-Za-z0-9_]+", lowered)
+    has_reference = any(
+        token in {"it", "this", "that", "these", "those", "there", "they", "them", "same", "above"}
+        for token in words
+    )
+    asks_about_previous = lowered.startswith(
+        ("why", "how", "what about", "where", "and ", "then ", "does ", "is ", "are ", "can ")
+    )
+    if len(words) <= 9 or has_reference or asks_about_previous:
+        previous = getattr(history[-1], "question", "") or ""
+        if previous and previous.lower() not in lowered:
+            return f"{previous}\nFollow-up: {question}"
+    return question
+
+
+def _focus(body: AskRequest) -> dict[str, Any] | None:
+    if not body.focus_path:
+        return None
+    return {
+        "path": body.focus_path,
+        "line_start": body.focus_line_start,
+        "line_end": body.focus_line_end,
     }
 
 
 def _run_query(
-    principal: Principal, repo_id: str, question: str, mode: str
+    principal: Principal, body: AskRequest
 ) -> dict[str, Any]:
     started = time.perf_counter()
-    repo = repo_for(principal, repo_id)
-    retrieval = retrieve(principal.org_id, repo_id, question, mode)
+    repo = repo_for(principal, body.repo_id)
+    retrieval_question = _retrieval_question(
+        body.question, body.history, bool(body.focus_path)
+    )
+    retrieval = retrieve(
+        principal.org_id, body.repo_id, retrieval_question, body.mode, focus=_focus(body)
+    )
     evidence = retrieval["evidence"]
     answer, citation_ids, abstained, confidence = compose_deterministic(
-        question, retrieval["mode"], evidence, repo
+        retrieval_question, retrieval["mode"], evidence, repo
     )
     engine = "deterministic"
     final: dict[str, Any] | None = None
     text = ""
     for delta, done in synth_stream(
-        question, retrieval["mode"], evidence, answer, citation_ids
+        retrieval_question,
+        retrieval["mode"],
+        evidence,
+        answer,
+        citation_ids,
+        history=body.history,
+        focus=_focus(body),
     ):
         text += delta
         if done:
@@ -262,7 +315,7 @@ def _run_query(
         principal.org_id,
         principal.user_id,
         "query.ask",
-        repo_id,
+        body.repo_id,
         meta={
             "mode": retrieval["mode"],
             "result_count": len(evidence),
@@ -286,7 +339,7 @@ def _run_query(
 
 @router.post("/ask", response_model=AskResponse)
 def ask(body: AskRequest, principal: Principal = Depends(get_principal)) -> AskResponse:
-    result = _run_query(principal, body.repo_id, body.question, body.mode)
+    result = _run_query(principal, body)
     return AskResponse(**result)
 
 
@@ -308,7 +361,12 @@ def ask_stream(body: AskRequest, principal: Principal = Depends(get_principal)) 
                 "repo": repo.get("full_name"),
             },
         )
-        retrieval = retrieve(principal.org_id, body.repo_id, body.question, body.mode)
+        retrieval_question = _retrieval_question(
+            body.question, body.history, bool(body.focus_path)
+        )
+        retrieval = retrieve(
+            principal.org_id, body.repo_id, retrieval_question, body.mode, focus=_focus(body)
+        )
         evidence = retrieval["evidence"]
         yield _sse(
             "evidence",
@@ -319,10 +377,18 @@ def ask_stream(body: AskRequest, principal: Principal = Depends(get_principal)) 
             },
         )
         answer, ids, abstained, confidence = compose_deterministic(
-            body.question, retrieval["mode"], evidence, repo
+            retrieval_question, retrieval["mode"], evidence, repo
         )
         final: dict[str, Any] | None = None
-        for delta, done in synth_stream(body.question, retrieval["mode"], evidence, answer, ids):
+        for delta, done in synth_stream(
+            retrieval_question,
+            retrieval["mode"],
+            evidence,
+            answer,
+            ids,
+            history=body.history,
+            focus=_focus(body),
+        ):
             if delta:
                 yield _sse("token", {"text": delta})
             if done:
@@ -385,7 +451,12 @@ def create_task(body: TaskCreate, principal: Principal = Depends(get_principal))
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Readers cannot create agent tasks")
     repo_for(principal, body.repo_id)
     task = agent_service.create_task(
-        principal.org_id, body.repo_id, principal.user_id, body.title, body.goal
+        principal.org_id,
+        body.repo_id,
+        principal.user_id,
+        body.title,
+        body.goal,
+        principal.role,
     )
     audit.record(principal.org_id, principal.user_id, "agent.task.create", body.repo_id, meta={"tool": "task"})
     return task

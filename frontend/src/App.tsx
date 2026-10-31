@@ -9,7 +9,7 @@ import { Handover } from "./pages/Handover";
 import { Security } from "./pages/Security";
 import { Agent } from "./pages/Agent";
 import { Graph } from "./pages/Graph";
-import type { PageKey } from "./nav";
+import { ROLE_HOME, type PageKey } from "./nav";
 
 const PAGES: PageKey[] = ["overview", "ask", "handover", "security", "agent", "graph"];
 
@@ -28,7 +28,7 @@ function Splash() {
 }
 
 export default function App() {
-  const { ready, user } = useAuth();
+  const { ready, user, role } = useAuth();
   const [page, setPage] = useState<PageKey>(readPage);
 
   useEffect(() => {
@@ -36,6 +36,13 @@ export default function App() {
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
+
+  useEffect(() => {
+    if (!ready || !user || window.location.hash) return;
+    const next = ROLE_HOME[role ?? "reader"];
+    window.location.hash = `#/${next}`;
+    setPage(next);
+  }, [ready, user, role]);
 
   const navigate = (next: PageKey) => {
     if (window.location.hash !== `#/${next}`) window.location.hash = `#/${next}`;
