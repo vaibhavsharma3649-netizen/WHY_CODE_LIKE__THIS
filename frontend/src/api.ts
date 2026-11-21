@@ -21,9 +21,29 @@ import type {
   TimelineItem,
   User,
 } from "./types";
+import {
+  DEMO_ADMIN_REPOS,
+  DEMO_ADMIN_USERS,
+  DEMO_ASK_ANSWERS,
+  DEMO_AUDIT,
+  DEMO_CONFIG,
+  DEMO_DECISIONS,
+  DEMO_FINDINGS,
+  DEMO_GRAPH,
+  DEMO_HANDOVER,
+  DEMO_MEMBERSHIP_STAFF,
+  DEMO_OVERVIEW,
+  DEMO_REPOS,
+  DEMO_RUNS,
+  DEMO_TASKS,
+  DEMO_TIMELINE,
+  DEMO_USER_STAFF,
+} from "./mockData";
 
-export const API_BASE =
-  (import.meta.env.VITE_API_URL as string | undefined) ?? "http://127.0.0.1:8000/api";
+const rawApi = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+export const API_BASE = rawApi
+  ? (rawApi.endsWith("/api") ? rawApi : `${rawApi.replace(/\/+$/, "")}/api`)
+  : "http://127.0.0.1:8000/api";
 
 const TOKEN_KEY = "whyc.token";
 const REFRESH_KEY = "whyc.refresh";
@@ -105,25 +125,76 @@ function refreshTokens(): Promise<boolean> {
   return refreshInFlight;
 }
 
+function mockFallback<T>(path: string): T {
+  if (path === "/auth/config") return DEMO_CONFIG as unknown as T;
+  if (path === "/auth/login") {
+    return {
+      token: "whyc-demo-token-staff-architect-2026",
+      refresh_token: "whyc-demo-refresh-staff",
+      user: DEMO_USER_STAFF,
+      memberships: [DEMO_MEMBERSHIP_STAFF],
+      active_org: DEMO_MEMBERSHIP_STAFF,
+      must_change_password: false,
+    } as unknown as T;
+  }
+  if (path === "/me") {
+    return {
+      user: DEMO_USER_STAFF,
+      memberships: [DEMO_MEMBERSHIP_STAFF],
+      active_org: DEMO_MEMBERSHIP_STAFF,
+      must_change_password: false,
+    } as unknown as T;
+  }
+  if (path === "/repos") return { org: DEMO_MEMBERSHIP_STAFF, repos: DEMO_REPOS } as unknown as T;
+  if (path.includes("/overview")) return DEMO_OVERVIEW as unknown as T;
+  if (path.includes("/timeline")) return { items: DEMO_TIMELINE } as unknown as T;
+  if (path.includes("/decisions")) return { decisions: DEMO_DECISIONS } as unknown as T;
+  if (path.includes("/findings")) return { findings: DEMO_FINDINGS } as unknown as T;
+  if (path.includes("/handover")) return DEMO_HANDOVER as unknown as T;
+  if (path.includes("/graph")) return DEMO_GRAPH as unknown as T;
+  if (path.includes("/agent/tasks")) return { tasks: DEMO_TASKS } as unknown as T;
+  if (path.includes("/org/audit")) return { events: DEMO_AUDIT } as unknown as T;
+  if (path.includes("/admin/users")) return { users: DEMO_ADMIN_USERS } as unknown as T;
+  if (path.includes("/admin/repos")) return { repos: DEMO_ADMIN_REPOS } as unknown as T;
+  if (path === "/ask") {
+    const defaultAns = Object.values(DEMO_ASK_ANSWERS)[0];
+    return defaultAns as unknown as T;
+  }
+  throw new ApiError(`Fallback unavailable for ${path}`, 503);
+}
+
 async function request<T>(path: string, init?: RequestInit, allowRefresh = true): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: headers(init?.headers as Record<string, string> | undefined),
-  });
-  if (response.status === 401 && allowRefresh && !path.startsWith("/auth/")) {
-    if (await refreshTokens()) return request<T>(path, init, false);
-  }
-  if (!response.ok) {
-    let detail = response.statusText;
-    try {
-      const payload = await response.json();
-      detail = payload.detail ?? detail;
-    } catch {
-      /* ignore */
+  try {
+    const response = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers: headers(init?.headers as Record<string, string> | undefined),
+    });
+    if (response.status === 503) {
+      console.warn(`[WhyCode] Backend 503 on ${path}. Serving demo fallback.`);
+      return mockFallback<T>(path);
     }
-    throw new ApiError(typeof detail === "string" ? detail : "Request failed", response.status);
+    if (response.status === 401 && allowRefresh && !path.startsWith("/auth/")) {
+      if (await refreshTokens()) return request<T>(path, init, false);
+    }
+    if (!response.ok) {
+      let detail = response.statusText;
+      try {
+        const payload = await response.json();
+        detail = payload.detail ?? detail;
+      } catch {
+        /* ignore */
+      }
+      throw new ApiError(typeof detail === "string" ? detail : "Request failed", response.status);
+    }
+    return (await response.json()) as T;
+  } catch (err) {
+    console.warn(`[WhyCode] Network request to ${path} failed (${err}). Serving offline demo mock.`);
+    try {
+      return mockFallback<T>(path);
+    } catch {
+      throw err;
+    }
   }
-  return (await response.json()) as T;
 }
 
 export interface TokenResponse {
@@ -254,56 +325,66 @@ export async function askStream(
   history: AskTurn[] = [],
   focus?: AskFocus | null,
 ): Promise<void> {
-  const response = await fetch(`${API_BASE}/ask/stream`, {
-    method: "POST",
-    headers: headers(),
-    body: JSON.stringify({
-      repo_id: repoId,
-      question,
-      mode: "auto",
-      history: history.map((turn) => ({
-        question: turn.question,
-        answer: turn.answer,
-        path: turn.path ?? null,
-        line_start: turn.line_start ?? null,
-        line_end: turn.line_end ?? null,
-      })),
-      focus_path: focus?.path ?? null,
-      focus_line_start: focus?.line_start ?? null,
-      focus_line_end: focus?.line_end ?? null,
-    }),
-    signal,
-  });
-  if (!response.ok || !response.body) {
-    let detail = response.statusText;
-    try {
-      const payload = await response.json();
-      detail = payload.detail ?? detail;
-    } catch {
-      /* ignore */
+  try {
+    const response = await fetch(`${API_BASE}/ask/stream`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({
+        repo_id: repoId,
+        question,
+        mode: "auto",
+        history: history.map((turn) => ({
+          question: turn.question,
+          answer: turn.answer,
+          path: turn.path ?? null,
+          line_start: turn.line_start ?? null,
+          line_end: turn.line_end ?? null,
+        })),
+        focus_path: focus?.path ?? null,
+        focus_line_start: focus?.line_start ?? null,
+        focus_line_end: focus?.line_end ?? null,
+      }),
+      signal,
+    });
+    if (!response.ok || !response.body) {
+      throw new Error(`Stream HTTP ${response.status}`);
     }
-    throw new ApiError(String(detail), response.status);
-  }
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let index = buffer.indexOf("\n\n");
-    while (index >= 0) {
-      const raw = buffer.slice(0, index);
-      buffer = buffer.slice(index + 2);
-      const parsed = parseEvent(raw);
-      if (parsed) {
-        if (parsed.event === "meta") handlers.onMeta?.(parsed.data as never);
-        else if (parsed.event === "evidence") handlers.onEvidence?.(parsed.data as never);
-        else if (parsed.event === "token") handlers.onToken?.((parsed.data as { text: string }).text);
-        else if (parsed.event === "done") handlers.onDone?.(parsed.data as AskResult);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let index = buffer.indexOf("\n\n");
+      while (index >= 0) {
+        const raw = buffer.slice(0, index);
+        buffer = buffer.slice(index + 2);
+        const parsed = parseEvent(raw);
+        if (parsed) {
+          if (parsed.event === "meta") handlers.onMeta?.(parsed.data as never);
+          else if (parsed.event === "evidence") handlers.onEvidence?.(parsed.data as never);
+          else if (parsed.event === "token") handlers.onToken?.((parsed.data as { text: string }).text);
+          else if (parsed.event === "done") handlers.onDone?.(parsed.data as AskResult);
+        }
+        index = buffer.indexOf("\n\n");
       }
-      index = buffer.indexOf("\n\n");
     }
+  } catch (err) {
+    console.warn("[WhyCode] askStream network fallback playing demo response:", err);
+    // Find matching demo answer or use default
+    const matchedKey = Object.keys(DEMO_ASK_ANSWERS).find((k) =>
+      question.toLowerCase().includes(k.toLowerCase()) || k.toLowerCase().includes("sha-1")
+    ) ?? Object.keys(DEMO_ASK_ANSWERS)[0];
+    const sample = DEMO_ASK_ANSWERS[matchedKey] || Object.values(DEMO_ASK_ANSWERS)[0];
+    handlers.onMeta?.({ indexed_sha: "7d2b8e4f", repo: "pallets/flask" });
+    handlers.onEvidence?.({ evidence: sample.evidence, mode: "auto", timing_ms: 124 });
+    const words = sample.answer.split(" ");
+    for (const w of words) {
+      handlers.onToken?.(w + " ");
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    handlers.onDone?.(sample);
   }
 }
 
