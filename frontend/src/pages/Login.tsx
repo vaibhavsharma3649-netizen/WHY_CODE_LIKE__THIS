@@ -105,7 +105,7 @@ export function Login() {
         </footer>
       </section>
 
-      <section className="login-main">
+      <main className="login-main" id="main-content">
         <div className="login-card">
           <header>
             <h2>Sign in</h2>
@@ -194,7 +194,7 @@ export function Login() {
             </div>
           </div>
         </div>
-      </section>
+      </main>
     </div>
   );
 }

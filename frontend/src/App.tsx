@@ -31,10 +31,10 @@ function readPage(): PageKey {
 
 function Splash() {
   return (
-    <div className="splash">
+    <main className="splash">
       <Mark size={38} />
       <span>Opening the memory…</span>
-    </div>
+    </main>
   );
 }
 

@@ -66,3 +66,15 @@ def test_wcag_color_contrast():
     assert (
         foot_ratio >= 4.5
     ), f"WCAG AA Failure: .login-foot ({foot_color}) on dark aside ratio is {foot_ratio:.2f}:1 (< 4.5:1)"
+
+
+def test_document_has_main_landmark():
+    login_tsx = Path("frontend/src/pages/Login.tsx").read_text(encoding="utf-8")
+    app_tsx = Path("frontend/src/App.tsx").read_text(encoding="utf-8")
+    layout_tsx = Path("frontend/src/components/Layout.tsx").read_text(encoding="utf-8")
+
+    # WCAG landmark-one-main requires a <main> landmark
+    assert "<main" in login_tsx and "</main>" in login_tsx, "Login page must contain a <main> landmark"
+    assert "<main" in app_tsx and "</main>" in app_tsx, "Splash view must contain a <main> landmark"
+    assert "<main" in layout_tsx and "</main>" in layout_tsx, "Layout component must contain a <main> landmark"
+
