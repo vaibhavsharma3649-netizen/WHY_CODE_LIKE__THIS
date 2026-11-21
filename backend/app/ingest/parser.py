@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -127,6 +128,92 @@ def _chunk_fixed(
     return chunks
 
 
+def _chunk_by_symbols(
+    file_id: str,
+    rel_path: str,
+    text: str,
+    language: str,
+    org_id: str,
+    repo_id: str,
+    commit_sha: str,
+    owner: str,
+    name: str,
+) -> list[Chunk]:
+    """Semantic chunking for Java, TypeScript, Go, Rust, and C-like languages based on declaration boundaries."""
+    lines = text.splitlines(keepends=True)
+    if not lines:
+        return []
+
+    boundary_pattern = re.compile(
+        r"^\s*(?:@\w+(?:\([^)]*\))?\s*)*(?:(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:public|protected|private|static|final|abstract|synchronized|\s)*\b(?:class|interface|record|enum|struct|func|function|fn|type|def)\b|(?:const|let|var)\s+\w+\s*=\s*(?:async\s*)?\([^)]*\)\s*=>)",
+        re.MULTILINE,
+    )
+
+    chunks: list[Chunk] = []
+    total_lines = len(lines)
+
+    if len(text) <= CHUNK_CHARS:
+        return [
+            Chunk(
+                chunk_id=chunk_key(repo_id, rel_path, 1),
+                file_id=file_id,
+                repo_id=repo_id,
+                org_id=org_id,
+                path=rel_path,
+                content_excerpt=text.strip(),
+                line_start=1,
+                line_end=total_lines,
+                commit_sha=commit_sha,
+                source_url=source_url(owner, name, commit_sha, rel_path, 1, total_lines),
+                language=language,
+            )
+        ]
+
+    split_lines: list[int] = [0]
+    for idx, line in enumerate(lines):
+        if idx > 0 and boundary_pattern.match(line):
+            split_lines.append(idx)
+    split_lines.append(total_lines)
+
+    for i in range(len(split_lines) - 1):
+        s_line = split_lines[i]
+        e_line = split_lines[i + 1]
+        block_text = "".join(lines[s_line:e_line]).strip()
+        if not block_text:
+            continue
+        line_start = s_line + 1
+        line_end = e_line
+
+        if len(block_text) <= MAX_FUNCTION_CHARS:
+            chunks.append(
+                Chunk(
+                    chunk_id=chunk_key(repo_id, rel_path, line_start),
+                    file_id=file_id,
+                    repo_id=repo_id,
+                    org_id=org_id,
+                    path=rel_path,
+                    content_excerpt=block_text,
+                    line_start=line_start,
+                    line_end=line_end,
+                    commit_sha=commit_sha,
+                    source_url=source_url(owner, name, commit_sha, rel_path, line_start, line_end),
+                    language=language,
+                )
+            )
+        else:
+            sub = _chunk_fixed(file_id, rel_path, block_text, language, org_id, repo_id, commit_sha, owner, name)
+            for ch in sub:
+                ch.line_start += s_line
+                ch.line_end += s_line
+                ch.chunk_id = chunk_key(repo_id, rel_path, ch.line_start)
+                ch.source_url = source_url(owner, name, commit_sha, rel_path, ch.line_start, ch.line_end)
+                chunks.append(ch)
+
+    if not chunks:
+        return _chunk_fixed(file_id, rel_path, text, language, org_id, repo_id, commit_sha, owner, name)
+    return chunks
+
+
 def chunk_file(
     rel_path: str,
     text: str,
@@ -137,30 +224,16 @@ def chunk_file(
     owner: str,
     name: str,
 ) -> list[Chunk]:
+    fid = file_key(repo_id, rel_path)
     if language == "python":
-        return _chunk_by_ast(
-            file_key(repo_id, rel_path),
-            rel_path,
-            text,
-            org_id,
-            repo_id,
-            commit_sha,
-            owner,
-            name,
-        )
-    return _chunk_fixed(
-        file_key(repo_id, rel_path),
-        rel_path,
-        text,
-        language,
-        org_id,
-        repo_id,
-        commit_sha,
-        owner,
-        name,
-    )
-    digest = hashlib.blake2b("\u241f".join(parts).encode(), digest_size=10).hexdigest()
-    return f"{prefix}_{digest}"
+        try:
+            return _chunk_by_ast(fid, rel_path, text, org_id, repo_id, commit_sha, owner, name)
+        except SyntaxError:
+            return _chunk_by_symbols(fid, rel_path, text, language, org_id, repo_id, commit_sha, owner, name)
+    if language in {"java", "typescript", "javascript", "go", "rust", "cpp", "c", "csharp", "kotlin"}:
+        return _chunk_by_symbols(fid, rel_path, text, language, org_id, repo_id, commit_sha, owner, name)
+    return _chunk_fixed(fid, rel_path, text, language, org_id, repo_id, commit_sha, owner, name)
+
 
 
 def repo_key(org_id: str, owner: str, name: str) -> str:
@@ -372,6 +445,457 @@ def parse_python(
     for item in entities:
         item["imports"] = sorted(set(imports))[:12]
     return ParsedFile(rel_path, text, "python", entities, sorted(set(imports)))
+
+
+def parse_java(
+    rel_path: str,
+    text: str,
+    org_id: str,
+    repo_id: str,
+    commit_sha: str,
+    owner: str,
+    name: str,
+) -> ParsedFile:
+    file_id = file_key(repo_id, rel_path)
+    entities: list[dict[str, Any]] = []
+    imports: list[str] = []
+    lines = text.splitlines()
+
+    pkg_match = re.search(r"^\s*package\s+([a-zA-Z0-9_.]+);", text, re.MULTILINE)
+    package_name = pkg_match.group(1) if pkg_match else rel_path.replace("/", ".").removesuffix(".java")
+
+    for match in re.finditer(r"^\s*import\s+(?:static\s+)?([a-zA-Z0-9_.*]+);", text, re.MULTILINE):
+        imports.append(match.group(1))
+
+    # Module-level compilation unit
+    entities.append(
+        {
+            "entity_id": entity_key(repo_id, rel_path, package_name, 1),
+            "file_id": file_id,
+            "repo_id": repo_id,
+            "org_id": org_id,
+            "name": package_name.split(".")[-1],
+            "qualified_name": package_name,
+            "kind": "module",
+            "path": rel_path,
+            "line_start": 1,
+            "line_end": len(lines),
+            "docstring": f"Java compilation unit {package_name}",
+            "signature": f"package {package_name}",
+            "module": package_name,
+            "source_url": source_url(owner, name, commit_sha, rel_path),
+            "commit_sha": commit_sha,
+            "calls": [],
+            "imports": sorted(set(imports))[:12],
+        }
+    )
+
+    # Classes, Interfaces, Records, Enums
+    class_pattern = re.compile(
+        r"^(?P<indent>\s*)(?:public|protected|private|static|final|abstract|\s)*"
+        r"\b(?P<kind>class|interface|enum|record)\s+(?P<name>[A-Za-z0-9_]+)(?P<rest>[^{]*)\{",
+        re.MULTILINE,
+    )
+    for m in class_pattern.finditer(text):
+        c_name = m.group("name")
+        c_kind = m.group("kind")
+        line_no = text[: m.start()].count("\n") + 1
+        qualified = f"{package_name}.{c_name}"
+        entities.append(
+            {
+                "entity_id": entity_key(repo_id, rel_path, qualified, line_no),
+                "file_id": file_id,
+                "repo_id": repo_id,
+                "org_id": org_id,
+                "name": c_name,
+                "qualified_name": qualified,
+                "kind": "class" if c_kind in {"class", "record"} else c_kind,
+                "path": rel_path,
+                "line_start": line_no,
+                "line_end": min(line_no + 40, len(lines)),
+                "docstring": "",
+                "signature": f"{c_kind} {c_name} {m.group('rest').strip()[:100]}".strip(),
+                "module": package_name,
+                "source_url": source_url(owner, name, commit_sha, rel_path, line_no),
+                "commit_sha": commit_sha,
+                "calls": [],
+                "imports": sorted(set(imports))[:12],
+            }
+        )
+
+    # Methods
+    method_pattern = re.compile(
+        r"^\s*(?:@\w+(?:\([^)]*\))?\s*)*(?:public|protected|private|static|final|synchronized|abstract)\s+"
+        r"(?:<[^>]+>\s+)?(?P<ret>[\w<>\[\], ]+)\s+(?P<name>[A-Za-z0-9_]+)\s*\((?P<args>[^)]*)\)",
+        re.MULTILINE,
+    )
+    for m in method_pattern.finditer(text):
+        m_name = m.group("name")
+        if m_name in {"if", "for", "while", "switch", "catch"}:
+            continue
+        line_no = text[: m.start()].count("\n") + 1
+        qualified = f"{package_name}.{m_name}"
+        entities.append(
+            {
+                "entity_id": entity_key(repo_id, rel_path, qualified, line_no),
+                "file_id": file_id,
+                "repo_id": repo_id,
+                "org_id": org_id,
+                "name": m_name,
+                "qualified_name": qualified,
+                "kind": "function",
+                "path": rel_path,
+                "line_start": line_no,
+                "line_end": min(line_no + 25, len(lines)),
+                "docstring": "",
+                "signature": f"{m.group('ret').strip()} {m_name}({m.group('args').strip()})",
+                "module": package_name,
+                "source_url": source_url(owner, name, commit_sha, rel_path, line_no),
+                "commit_sha": commit_sha,
+                "calls": [],
+                "imports": sorted(set(imports))[:12],
+            }
+        )
+
+    return ParsedFile(rel_path, text, "java", entities, sorted(set(imports)))
+
+
+def parse_javascript(
+    rel_path: str,
+    text: str,
+    language: str,
+    org_id: str,
+    repo_id: str,
+    commit_sha: str,
+    owner: str,
+    name: str,
+) -> ParsedFile:
+    file_id = file_key(repo_id, rel_path)
+    entities: list[dict[str, Any]] = []
+    imports: list[str] = []
+    lines = text.splitlines()
+
+    module = rel_path.replace("\\", "/").rsplit(".", 1)[0].replace("/", ".")
+
+    for m in re.finditer(r"import\s+.*?\s+from\s+['\"](.*?)['\"]", text):
+        imports.append(m.group(1))
+    for m in re.finditer(r"require\(['\"](.*?)['\"]\)", text):
+        imports.append(m.group(1))
+
+    entities.append(
+        {
+            "entity_id": entity_key(repo_id, rel_path, module, 1),
+            "file_id": file_id,
+            "repo_id": repo_id,
+            "org_id": org_id,
+            "name": module.split(".")[-1],
+            "qualified_name": module,
+            "kind": "module",
+            "path": rel_path,
+            "line_start": 1,
+            "line_end": len(lines),
+            "docstring": f"{language.title()} module {module}",
+            "signature": f"module {module}",
+            "module": module,
+            "source_url": source_url(owner, name, commit_sha, rel_path),
+            "commit_sha": commit_sha,
+            "calls": [],
+            "imports": sorted(set(imports))[:12],
+        }
+    )
+
+    # Classes
+    for m in re.finditer(r"(?:export\s+)?(?:default\s+)?class\s+([A-Za-z0-9_]+)", text):
+        c_name = m.group(1)
+        line_no = text[: m.start()].count("\n") + 1
+        qualified = f"{module}.{c_name}"
+        entities.append(
+            {
+                "entity_id": entity_key(repo_id, rel_path, qualified, line_no),
+                "file_id": file_id,
+                "repo_id": repo_id,
+                "org_id": org_id,
+                "name": c_name,
+                "qualified_name": qualified,
+                "kind": "class",
+                "path": rel_path,
+                "line_start": line_no,
+                "line_end": min(line_no + 30, len(lines)),
+                "docstring": "",
+                "signature": f"class {c_name}",
+                "module": module,
+                "source_url": source_url(owner, name, commit_sha, rel_path, line_no),
+                "commit_sha": commit_sha,
+                "calls": [],
+                "imports": sorted(set(imports))[:12],
+            }
+        )
+
+    # Functions & Arrow Functions
+    func_pattern = re.compile(
+        r"(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+([A-Za-z0-9_]+)\s*\(([^)]*)\)|"
+        r"(?:export\s+)?const\s+([A-Za-z0-9_]+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>",
+        re.MULTILINE,
+    )
+    for m in func_pattern.finditer(text):
+        f_name = m.group(1) or m.group(3)
+        args = m.group(2) or m.group(4) or ""
+        if not f_name or f_name in {"if", "for", "while"}:
+            continue
+        line_no = text[: m.start()].count("\n") + 1
+        qualified = f"{module}.{f_name}"
+        entities.append(
+            {
+                "entity_id": entity_key(repo_id, rel_path, qualified, line_no),
+                "file_id": file_id,
+                "repo_id": repo_id,
+                "org_id": org_id,
+                "name": f_name,
+                "qualified_name": qualified,
+                "kind": "function",
+                "path": rel_path,
+                "line_start": line_no,
+                "line_end": min(line_no + 20, len(lines)),
+                "docstring": "",
+                "signature": f"function {f_name}({args.strip()})",
+                "module": module,
+                "source_url": source_url(owner, name, commit_sha, rel_path, line_no),
+                "commit_sha": commit_sha,
+                "calls": [],
+                "imports": sorted(set(imports))[:12],
+            }
+        )
+
+    return ParsedFile(rel_path, text, language, entities, sorted(set(imports)))
+
+
+def parse_go(
+    rel_path: str,
+    text: str,
+    org_id: str,
+    repo_id: str,
+    commit_sha: str,
+    owner: str,
+    name: str,
+) -> ParsedFile:
+    file_id = file_key(repo_id, rel_path)
+    entities: list[dict[str, Any]] = []
+    imports: list[str] = []
+    lines = text.splitlines()
+
+    pkg_match = re.search(r"^\s*package\s+([A-Za-z0-9_]+)", text, re.MULTILINE)
+    package_name = pkg_match.group(1) if pkg_match else "main"
+
+    for m in re.finditer(r"import\s+[\"'](.*?)[\"']", text):
+        imports.append(m.group(1))
+    for m in re.finditer(r"import\s+\((.*?)\)", text, re.DOTALL):
+        for sub in re.findall(r"[\"'](.*?)[\"']", m.group(1)):
+            imports.append(sub)
+
+    entities.append(
+        {
+            "entity_id": entity_key(repo_id, rel_path, package_name, 1),
+            "file_id": file_id,
+            "repo_id": repo_id,
+            "org_id": org_id,
+            "name": package_name,
+            "qualified_name": package_name,
+            "kind": "module",
+            "path": rel_path,
+            "line_start": 1,
+            "line_end": len(lines),
+            "docstring": f"Go package {package_name}",
+            "signature": f"package {package_name}",
+            "module": package_name,
+            "source_url": source_url(owner, name, commit_sha, rel_path),
+            "commit_sha": commit_sha,
+            "calls": [],
+            "imports": sorted(set(imports))[:12],
+        }
+    )
+
+    # Structs and Interfaces
+    for m in re.finditer(r"type\s+([A-Za-z0-9_]+)\s+(struct|interface)", text):
+        s_name = m.group(1)
+        s_kind = m.group(2)
+        line_no = text[: m.start()].count("\n") + 1
+        qualified = f"{package_name}.{s_name}"
+        entities.append(
+            {
+                "entity_id": entity_key(repo_id, rel_path, qualified, line_no),
+                "file_id": file_id,
+                "repo_id": repo_id,
+                "org_id": org_id,
+                "name": s_name,
+                "qualified_name": qualified,
+                "kind": "class" if s_kind == "struct" else "interface",
+                "path": rel_path,
+                "line_start": line_no,
+                "line_end": min(line_no + 20, len(lines)),
+                "docstring": "",
+                "signature": f"type {s_name} {s_kind}",
+                "module": package_name,
+                "source_url": source_url(owner, name, commit_sha, rel_path, line_no),
+                "commit_sha": commit_sha,
+                "calls": [],
+                "imports": sorted(set(imports))[:12],
+            }
+        )
+
+    # Functions and Methods
+    func_pattern = re.compile(
+        r"func\s*(?:\(\s*(?:[\w*]+\s+)?\*?([A-Za-z0-9_]+)\s*\)\s*)?([A-Za-z0-9_]+)\s*\(([^)]*)\)",
+        re.MULTILINE,
+    )
+    for m in func_pattern.finditer(text):
+        recv = m.group(1)
+        f_name = m.group(2)
+        args = m.group(3) or ""
+        line_no = text[: m.start()].count("\n") + 1
+        qualified = f"{package_name}.{recv}.{f_name}" if recv else f"{package_name}.{f_name}"
+        entities.append(
+            {
+                "entity_id": entity_key(repo_id, rel_path, qualified, line_no),
+                "file_id": file_id,
+                "repo_id": repo_id,
+                "org_id": org_id,
+                "name": f_name,
+                "qualified_name": qualified,
+                "kind": "function",
+                "path": rel_path,
+                "line_start": line_no,
+                "line_end": min(line_no + 25, len(lines)),
+                "docstring": "",
+                "signature": f"func ({recv}) {f_name}({args})" if recv else f"func {f_name}({args})",
+                "module": package_name,
+                "source_url": source_url(owner, name, commit_sha, rel_path, line_no),
+                "commit_sha": commit_sha,
+                "calls": [],
+                "imports": sorted(set(imports))[:12],
+            }
+        )
+
+    return ParsedFile(rel_path, text, "go", entities, sorted(set(imports)))
+
+
+def parse_generic(
+    rel_path: str,
+    text: str,
+    language: str,
+    org_id: str,
+    repo_id: str,
+    commit_sha: str,
+    owner: str,
+    name: str,
+) -> ParsedFile:
+    file_id = file_key(repo_id, rel_path)
+    entities: list[dict[str, Any]] = []
+    lines = text.splitlines()
+    module = rel_path.replace("\\", "/").rsplit(".", 1)[0].replace("/", ".")
+
+    entities.append(
+        {
+            "entity_id": entity_key(repo_id, rel_path, module, 1),
+            "file_id": file_id,
+            "repo_id": repo_id,
+            "org_id": org_id,
+            "name": module.split(".")[-1],
+            "qualified_name": module,
+            "kind": "module",
+            "path": rel_path,
+            "line_start": 1,
+            "line_end": len(lines),
+            "docstring": f"{language.title()} module {module}",
+            "signature": f"module {module}",
+            "module": module,
+            "source_url": source_url(owner, name, commit_sha, rel_path),
+            "commit_sha": commit_sha,
+            "calls": [],
+            "imports": [],
+        }
+    )
+
+    # General pattern for class/struct
+    for m in re.finditer(r"\b(?:class|struct|interface|impl|enum)\s+([A-Za-z0-9_]+)", text):
+        c_name = m.group(1)
+        line_no = text[: m.start()].count("\n") + 1
+        entities.append(
+            {
+                "entity_id": entity_key(repo_id, rel_path, f"{module}.{c_name}", line_no),
+                "file_id": file_id,
+                "repo_id": repo_id,
+                "org_id": org_id,
+                "name": c_name,
+                "qualified_name": f"{module}.{c_name}",
+                "kind": "class",
+                "path": rel_path,
+                "line_start": line_no,
+                "line_end": min(line_no + 20, len(lines)),
+                "docstring": "",
+                "signature": f"class {c_name}",
+                "module": module,
+                "source_url": source_url(owner, name, commit_sha, rel_path, line_no),
+                "commit_sha": commit_sha,
+                "calls": [],
+                "imports": [],
+            }
+        )
+
+    # General pattern for functions
+    for m in re.finditer(r"\b(?:fn|function|def|void|int|bool|string)\s+([A-Za-z0-9_]+)\s*\(([^)]*)\)", text):
+        f_name = m.group(1)
+        if f_name in {"if", "for", "while", "switch"}:
+            continue
+        line_no = text[: m.start()].count("\n") + 1
+        entities.append(
+            {
+                "entity_id": entity_key(repo_id, rel_path, f"{module}.{f_name}", line_no),
+                "file_id": file_id,
+                "repo_id": repo_id,
+                "org_id": org_id,
+                "name": f_name,
+                "qualified_name": f"{module}.{f_name}",
+                "kind": "function",
+                "path": rel_path,
+                "line_start": line_no,
+                "line_end": min(line_no + 20, len(lines)),
+                "docstring": "",
+                "signature": f"{f_name}({m.group(2)[:50]})",
+                "module": module,
+                "source_url": source_url(owner, name, commit_sha, rel_path, line_no),
+                "commit_sha": commit_sha,
+                "calls": [],
+                "imports": [],
+            }
+        )
+
+    return ParsedFile(rel_path, text, language, entities, [])
+
+
+def parse_code(
+    rel_path: str,
+    text: str,
+    language: str,
+    org_id: str,
+    repo_id: str,
+    commit_sha: str,
+    owner: str,
+    name: str,
+) -> ParsedFile:
+    lang = (language or "python").lower()
+    if lang == "python":
+        try:
+            return parse_python(rel_path, text, org_id, repo_id, commit_sha, owner, name)
+        except SyntaxError:
+            return parse_generic(rel_path, text, lang, org_id, repo_id, commit_sha, owner, name)
+    if lang == "java":
+        return parse_java(rel_path, text, org_id, repo_id, commit_sha, owner, name)
+    if lang in {"typescript", "javascript"}:
+        return parse_javascript(rel_path, text, lang, org_id, repo_id, commit_sha, owner, name)
+    if lang == "go":
+        return parse_go(rel_path, text, org_id, repo_id, commit_sha, owner, name)
+    return parse_generic(rel_path, text, lang, org_id, repo_id, commit_sha, owner, name)
+
 
 
 def normalize_rel(path: Path, root: Path) -> str:

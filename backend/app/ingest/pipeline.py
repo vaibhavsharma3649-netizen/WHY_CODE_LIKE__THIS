@@ -112,9 +112,14 @@ def _select_files(root: Path) -> tuple[list[tuple[Path, str, str]], list[str]]:
             skipped.append(f"{rel} (larger than {p.MAX_FILE_BYTES // 1000}KB)")
             continue
         suffix = path.suffix.lower()
-        if suffix in {".py", ".md", ".rst", ".toml", ".cfg", ".txt", ".yaml", ".yml", ".json"}:
-            if suffix == ".py":
-                priority = 0 if rel.startswith("src/") else 1
+        supported_code = {
+            ".py", ".java", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs",
+            ".cs", ".cpp", ".c", ".h", ".hpp", ".kt",
+            ".md", ".rst", ".toml", ".cfg", ".txt", ".yaml", ".yml", ".json",
+        }
+        if suffix in supported_code:
+            if suffix in {".py", ".java", ".ts", ".tsx", ".js", ".go", ".rs"}:
+                priority = 0 if rel.startswith(("src/", "app/", "lib/", "pkg/")) else 1
             elif rel.lower().startswith("readme") or rel.lower().startswith("changes"):
                 priority = 2
             else:
@@ -128,8 +133,28 @@ def _select_files(root: Path) -> tuple[list[tuple[Path, str, str]], list[str]]:
             skipped.append(f"{len(candidates) - len(selected)} additional files (file budget {settings.max_files})")
             break
         language = {
-            ".py": "python", ".md": "markdown", ".rst": "rst", ".toml": "toml",
-            ".cfg": "ini", ".txt": "text", ".yaml": "yaml", ".yml": "yaml", ".json": "json",
+            ".py": "python",
+            ".java": "java",
+            ".ts": "typescript",
+            ".tsx": "typescript",
+            ".js": "javascript",
+            ".jsx": "javascript",
+            ".go": "go",
+            ".rs": "rust",
+            ".cs": "csharp",
+            ".cpp": "cpp",
+            ".c": "c",
+            ".h": "c",
+            ".hpp": "cpp",
+            ".kt": "kotlin",
+            ".md": "markdown",
+            ".rst": "rst",
+            ".toml": "toml",
+            ".cfg": "ini",
+            ".txt": "text",
+            ".yaml": "yaml",
+            ".yml": "yaml",
+            ".json": "json",
         }.get(path.suffix.lower(), "text")
         selected.append((path, rel, language))
     return selected, skipped
@@ -639,12 +664,12 @@ def ingest(
                     "indexed_at": _now(),
                 }
             )
-            if language == "python":
+            if language in {"python", "java", "typescript", "javascript", "go", "rust", "csharp", "cpp", "c", "kotlin"}:
                 try:
-                    parsed = p.parse_python(rel, text, org_id, repo_id, sha, owner, name)
+                    parsed = p.parse_code(rel, text, language, org_id, repo_id, sha, owner, name)
                     entity_rows.extend(parsed.entities)
-                except SyntaxError:
-                    skipped.append(f"{rel} (python parse error)")
+                except Exception as exc:
+                    skipped.append(f"{rel} ({language} parse error: {exc})")
             for chunk in p.chunk_file(rel, text, language, org_id, repo_id, sha, owner, name):
                 chunk_rows.append(chunk.__dict__)
             if len(chunk_rows) > 900:

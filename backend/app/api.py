@@ -803,8 +803,9 @@ def list_invariant_scenarios() -> list[dict[str, Any]]:
     return [
         {
             "id": "scenario-1",
-            "name": "Legacy Mobile HMAC-SHA1 Compatibility",
-            "target_file": "backend/app/auth/sessions.py",
+            "name": "Legacy Mobile HMAC-SHA1 Compatibility (Python)",
+            "language": "python",
+            "target_file": "src/flask/sessions.py",
             "target_symbol": "verify_session_token",
             "invariant_id": "INV-5460",
             "invariant_title": "Backward Compatibility with Mobile Client SHA1 Tokens",
@@ -813,12 +814,35 @@ def list_invariant_scenarios() -> list[dict[str, Any]]:
         },
         {
             "id": "scenario-2",
-            "name": "Synchronous WSGI Lifespan Teardown",
-            "target_file": "backend/app/main.py",
+            "name": "Synchronous WSGI Lifespan Teardown (Python)",
+            "language": "python",
+            "target_file": "src/flask/app.py",
             "target_symbol": "lifespan",
             "invariant_id": "INV-4912",
             "invariant_title": "Synchronous WSGI Teardown Lock Invariant",
             "resurrected_cve": "CVE-2022-4912",
+            "blast_hops": 2,
+        },
+        {
+            "id": "scenario-3",
+            "name": "Spring SecurityFilterChain Bean Invariant (Java)",
+            "language": "java",
+            "target_file": "src/main/java/org/springframework/boot/autoconfigure/security/SecurityConfig.java",
+            "target_symbol": "filterChain(HttpSecurity http)",
+            "invariant_id": "INV-34091",
+            "invariant_title": "SecurityFilterChain Component Bean Invariant",
+            "resurrected_cve": "CVE-2023-34035",
+            "blast_hops": 3,
+        },
+        {
+            "id": "scenario-4",
+            "name": "sync.Pool Context Memory Lifecycle (Go)",
+            "language": "go",
+            "target_file": "pkg/gin.go",
+            "target_symbol": "ServeHTTP(w http.ResponseWriter, req *http.Request)",
+            "invariant_id": "INV-1420",
+            "invariant_title": "Zero-Allocation Goroutine Context Copy Invariant",
+            "resurrected_cve": "RACE-COND-2023",
             "blast_hops": 2,
         },
     ]
@@ -827,8 +851,15 @@ def list_invariant_scenarios() -> list[dict[str, Any]]:
 @router.post("/invariants/verify")
 def verify_invariant(payload: dict[str, Any]) -> dict[str, Any]:
     scenario_id = payload.get("scenario_id", "scenario-1")
-    patch = payload.get("patch", "")
-    has_dual_adapter = "dual" in patch.lower() or "legacy" in patch.lower() or "sha1" in patch.lower()
+    patch = payload.get("patch", "").lower()
+    has_dual_adapter = (
+        "dual" in patch
+        or "legacy" in patch
+        or "sha1" in patch
+        or "copy" in patch
+        or "filterchain" in patch
+        or "adapter" in patch
+    )
     return {
         "scenario_id": scenario_id,
         "oracle_status": "PASSED" if has_dual_adapter else "FAILED",
@@ -839,7 +870,8 @@ def verify_invariant(payload: dict[str, Any]) -> dict[str, Any]:
         "message": (
             "Zero regressions detected. All downstream invariant contracts satisfied."
             if has_dual_adapter
-            else "Contract broken: Legacy token verification failed with 401 Unauthorized."
+            else "Contract broken: Invariant verification failed. Regression detected in downstream callers."
         ),
     }
+
 

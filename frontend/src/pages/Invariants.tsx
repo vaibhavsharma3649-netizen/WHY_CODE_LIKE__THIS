@@ -233,6 +233,175 @@ def do_teardown_appcontext(self, exc: BaseException | None = None) -> None:
   }
 }`,
   },
+  {
+    id: "spring-security-filterchain",
+    name: "Spring Boot · SecurityFilterChain Bean Invariant (Java)",
+    target_file: "src/main/java/org/springframework/boot/autoconfigure/security/SecurityConfig.java",
+    target_symbol: "filterChain(HttpSecurity http)",
+    line_range: "lines 42–68",
+    naive_prompt: "Autonomous Agent prompt: 'Refactor deprecated authorizeRequests() to authorizeHttpRequests() and simplify bean precedence for fast boot.'",
+    invariant_id: "INV-34091",
+    invariant_title: "Preserve strict SecurityFilterChain bean precedence for multi-tenant actuator endpoints",
+    author: "Spring Security Core (@spring-projects)",
+    merged_pr: "PR #34091",
+    pr_url: "https://github.com/spring-projects/spring-boot/pull/34091",
+    decided_at: "2024-01-18",
+    resurrected_cve: "CVE-2023-34035 (Spring Security Actuator Authorization Bypass)",
+    blast_hops: 3,
+    cascading_callers: [
+      "org.springframework.security.web.SecurityFilterChain",
+      "org.springframework.boot.actuate.autoconfigure.security.servlet.ManagementWebSecurityAutoConfiguration",
+      "Enterprise Kubernetes Health Probe Gateway",
+    ],
+    threatened_contract:
+      "Custom SecurityFilterChain must explicitly declare @Order(SecurityProperties.BASIC_AUTH_ORDER - 10) before ActuatorFilterChain. Dropping @Order causes default fallback to catch-all matchers, exposing unauthenticated /actuator/env endpoints.",
+    counterfactual_test_code: `@SpringBootTest
+@AutoConfigureMockMvc
+class SecurityFilterChainInvariantTest {
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Test
+    void test_invariant_34091_actuator_requires_authentication() throws Exception {
+        // [SYNTHESIZED TEST ORACLE BY WHYCODE]
+        // Verifies CVE-2023-34035 invariant: Actuator endpoints cannot be bypassed
+        // by missing bean order precedence in custom SecurityFilterChain.
+        mockMvc.perform(get("/actuator/env"))
+            .andExpect(status().isUnauthorized()); // Fails with 200 OK if invariant broken!
+    }
+}`,
+    test_failure_log: `$ ./mvnw test -Dtest=SecurityFilterChainInvariantTest
+[INFO] Running SecurityFilterChainInvariantTest
+[ERROR] Failures: 
+[ERROR]   SecurityFilterChainInvariantTest.test_invariant_34091_actuator_requires_authentication:28
+Expected status <401 UNAUTHORIZED> but was <200 OK>
+[WhyCode Invariant Violation]:
+Decision #34091 broken! Custom SecurityFilterChain lacked @Order annotation.
+Blast radius: /actuator/env and /actuator/heapdump exposed without credentials.
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0`,
+    test_success_log: `$ ./mvnw test -Dtest=SecurityFilterChainInvariantTest
+[INFO] Running SecurityFilterChainInvariantTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.42 s - in SecurityFilterChainInvariantTest
+[WhyCode Verifier]: Invariant INV-34091 verified. Actuator endpoint boundary enforced.`,
+    naive_broken_code: `// NAIVE AGENT REFACTOR (Breaks Invariant INV-34091)
+@Bean
+public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    // Missing @Order annotation! Default order puts this behind management filter
+    http.authorizeHttpRequests(auth -> auth.anyRequest().authenticated());
+    return http.build();
+}`,
+    synthesized_safe_patch: `// WHYCODE SELF-HEALING REPAIR PATCH (Order Annotation & Explicit Actuator Isolation)
+@Bean
+@Order(Ordered.HIGHEST_PRECEDENCE + 50)
+public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    http.securityMatcher(EndpointRequest.toAnyEndpoint())
+        .authorizeHttpRequests(auth -> auth.requestMatchers("/actuator/health").permitAll()
+                                           .anyRequest().hasRole("ADMIN"))
+        .httpBasic(Customizer.withDefaults());
+    return http.build();
+}`,
+    mcp_payload: `{
+  "tool": "whycode_verify_change_invariants",
+  "args": {
+    "path": "src/main/java/org/springframework/boot/autoconfigure/security/SecurityConfig.java",
+    "symbol": "filterChain",
+    "status": "AUTO_REPAIRED",
+    "invariant_id": "INV-34091",
+    "resolution": "Applied @Order(HIGHEST_PRECEDENCE + 50) and EndpointRequest matcher isolation"
+  }
+}`,
+  },
+  {
+    id: "gin-syncpool-context",
+    name: "Gin · Context sync.Pool Escape & Concurrency (Go)",
+    target_file: "pkg/gin/context.go",
+    target_symbol: "ServeHTTP(w http.ResponseWriter, req *http.Request)",
+    line_range: "lines 115–140",
+    naive_prompt: "Autonomous Agent prompt: 'Spawn async audit logger in c.Next() without c.Copy() to eliminate 160-byte allocation.'",
+    invariant_id: "INV-1420",
+    invariant_title: "Require c.Copy() when escaping *gin.Context to background goroutines",
+    author: "Gin Web Framework Core (@gin-gonic)",
+    merged_pr: "PR #1420",
+    pr_url: "https://github.com/gin-gonic/gin/pull/1420",
+    decided_at: "2023-08-22",
+    resurrected_cve: "DATA-RACE-3012 (Data Race & Memory Corruption on Recycled Context)",
+    blast_hops: 2,
+    cascading_callers: [
+      "github.com/gin-gonic/gin.Engine.handleHTTPRequest",
+      "sync.Pool.Put(c)",
+      "Production Background Audit Dispatcher",
+    ],
+    threatened_contract:
+      "*gin.Context is pooled via sync.Pool and zeroed upon HTTP request completion. Escaping raw pointer to goroutines without c.Copy() results in use-after-free and cross-request data leaks.",
+    counterfactual_test_code: `package gin_test
+
+import (
+    "testing"
+    "net/http"
+    "net/http/httptest"
+    "github.com/gin-gonic/gin"
+)
+
+func TestInvariant1420_ContextGoroutineLeak(t *testing.T) {
+    // [SYNTHESIZED TEST ORACLE BY WHYCODE]
+    // Validates invariant INV-1420: gin.Context escaping to goroutines must use c.Copy().
+    r := gin.New()
+    var leakedParam string
+    r.GET("/user/:id", func(c *gin.Context) {
+        // Without c.Copy(), sync.Pool recycles c before goroutine executes
+        go func(ctx *gin.Context) {
+            leakedParam = ctx.Param("id")
+        }(c)
+    })
+    req, _ := http.NewRequest("GET", "/user/42", nil)
+    r.ServeHTTP(httptest.NewRecorder(), req)
+}`,
+    test_failure_log: `$ go test -race -run TestInvariant1420_ContextGoroutineLeak ./...
+==================
+WARNING: DATA RACE
+Write at 0x00c000108000 by goroutine 7:
+  github.com/gin-gonic/gin.(*Engine).ServeHTTP()
+      pkg/gin/gin.go:412
+Previous read at 0x00c000108000 by goroutine 8:
+  github.com/gin-gonic/gin_test.TestInvariant1420.func1.1()
+      pkg/gin/context_test.go:24
+==================
+[WhyCode Invariant Violation]:
+Decision #1420 broken! Raw *gin.Context escaped to goroutine without c.Copy().
+Pool recycled context while background thread was still reading request parameters.
+FAIL: TestInvariant1420_ContextGoroutineLeak (0.02s)`,
+    test_success_log: `$ go test -race -run TestInvariant1420_ContextGoroutineLeak ./...
+PASS
+[WhyCode Verifier]: Invariant INV-1420 verified. Safe context copy prevents race condition.
+ok  github.com/gin-gonic/gin  0.038s`,
+    naive_broken_code: `// NAIVE AGENT REFACTOR (Breaks Invariant INV-1420)
+func AuditMiddleware() gin.HandlerFunc {
+    return func(c *gin.Context) {
+        c.Next()
+        // Agent passed raw 'c' to save 1 allocation -> causes data race with sync.Pool
+        go logAuditEvent(c)
+    }
+}`,
+    synthesized_safe_patch: `// WHYCODE SELF-HEALING REPAIR PATCH (Deep Context Clone Pattern)
+func AuditMiddleware() gin.HandlerFunc {
+    return func(c *gin.Context) {
+        c.Next()
+        // Invariant INV-1420: Clone context before detaching from request lifecycle
+        cCp := c.Copy()
+        go logAuditEvent(cCp)
+    }
+}`,
+    mcp_payload: `{
+  "tool": "whycode_verify_change_invariants",
+  "args": {
+    "path": "pkg/gin/context.go",
+    "symbol": "ServeHTTP",
+    "status": "AUTO_REPAIRED",
+    "invariant_id": "INV-1420",
+    "resolution": "Enforced c.Copy() before goroutine dispatch to preserve sync.Pool memory safety"
+  }
+}`,
+  },
 ];
 
 export function Invariants() {

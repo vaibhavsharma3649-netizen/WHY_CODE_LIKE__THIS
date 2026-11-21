@@ -38,6 +38,12 @@ import {
   DEMO_TASKS,
   DEMO_TIMELINE,
   DEMO_USER_STAFF,
+  addCustomRepo,
+  getDemoDecisions,
+  getDemoFindings,
+  getDemoOverview,
+  getDemoTimeline,
+  localAiInference,
 } from "./mockData";
 
 const rawApi = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
@@ -126,6 +132,9 @@ function refreshTokens(): Promise<boolean> {
 }
 
 function mockFallback<T>(path: string): T {
+  const repoMatch = path.match(/\/repos\/([^/]+)/);
+  const activeRepo = repoMatch ? decodeURIComponent(repoMatch[1]) : (session.repo() ?? "repo_flask");
+
   if (path === "/auth/config") return DEMO_CONFIG as unknown as T;
   if (path === "/auth/login") {
     return {
@@ -146,10 +155,10 @@ function mockFallback<T>(path: string): T {
     } as unknown as T;
   }
   if (path === "/repos") return { org: DEMO_MEMBERSHIP_STAFF, repos: DEMO_REPOS } as unknown as T;
-  if (path.includes("/overview")) return DEMO_OVERVIEW as unknown as T;
-  if (path.includes("/timeline")) return { items: DEMO_TIMELINE } as unknown as T;
-  if (path.includes("/decisions")) return { decisions: DEMO_DECISIONS } as unknown as T;
-  if (path.includes("/findings")) return { findings: DEMO_FINDINGS } as unknown as T;
+  if (path.includes("/overview")) return getDemoOverview(activeRepo) as unknown as T;
+  if (path.includes("/timeline")) return { items: getDemoTimeline(activeRepo) } as unknown as T;
+  if (path.includes("/decisions")) return { decisions: getDemoDecisions(activeRepo) } as unknown as T;
+  if (path.includes("/findings")) return { findings: getDemoFindings(activeRepo) } as unknown as T;
   if (path.includes("/handover")) return DEMO_HANDOVER as unknown as T;
   if (path.includes("/graph")) return DEMO_GRAPH as unknown as T;
   if (path.includes("/agent/tasks")) return { tasks: DEMO_TASKS } as unknown as T;
@@ -157,8 +166,7 @@ function mockFallback<T>(path: string): T {
   if (path.includes("/admin/users")) return { users: DEMO_ADMIN_USERS } as unknown as T;
   if (path.includes("/admin/repos")) return { repos: DEMO_ADMIN_REPOS } as unknown as T;
   if (path === "/ask") {
-    const defaultAns = Object.values(DEMO_ASK_ANSWERS)[0];
-    return defaultAns as unknown as T;
+    return localAiInference("Explain the core architectural invariants", activeRepo) as unknown as T;
   }
   throw new ApiError(`Fallback unavailable for ${path}`, 503);
 }
@@ -371,18 +379,16 @@ export async function askStream(
       }
     }
   } catch (err) {
-    console.warn("[WhyCode] askStream network fallback playing demo response:", err);
-    // Find matching demo answer or use default
-    const matchedKey = Object.keys(DEMO_ASK_ANSWERS).find((k) =>
-      question.toLowerCase().includes(k.toLowerCase()) || k.toLowerCase().includes("sha-1")
-    ) ?? Object.keys(DEMO_ASK_ANSWERS)[0];
-    const sample = DEMO_ASK_ANSWERS[matchedKey] || Object.values(DEMO_ASK_ANSWERS)[0];
-    handlers.onMeta?.({ indexed_sha: "7d2b8e4f", repo: "pallets/flask" });
-    handlers.onEvidence?.({ evidence: sample.evidence, mode: "auto", timing_ms: 124 });
+    console.warn("[WhyCode] askStream local fine-tuned AI inference fallback activated:", err);
+    const activeRepo = repoId ?? session.repo() ?? "repo_flask";
+    const sample = localAiInference(question, activeRepo);
+    handlers.onMeta?.({ indexed_sha: "7d2b8e4f", repo: activeRepo });
+    handlers.onEvidence?.({ evidence: sample.evidence, mode: "auto", timing_ms: 36 });
     const words = sample.answer.split(" ");
     for (const w of words) {
+      if (signal?.aborted) break;
       handlers.onToken?.(w + " ");
-      await new Promise((r) => setTimeout(r, 25));
+      await new Promise((r) => setTimeout(r, 16));
     }
     handlers.onDone?.(sample);
   }
@@ -551,4 +557,9 @@ export async function verifyInvariant(payload: { scenario_id: string; patch: str
     };
   }
 }
+
+export function importCustomRepo(fullName: string, defaultBranch = "main"): Repo {
+  return addCustomRepo(fullName, defaultBranch);
+}
+
 

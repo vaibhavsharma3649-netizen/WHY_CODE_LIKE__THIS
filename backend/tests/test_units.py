@@ -160,6 +160,82 @@ class MyService:
     assert "function" in kinds
 
 
+def test_multilang_parsing():
+    # 1. Java Parsing
+    java_code = """
+package org.springframework.boot;
+import java.util.List;
+
+public class SecurityConfig {
+    public void configureAuth(AuthenticationManager auth) {
+        auth.inMemoryAuthentication();
+    }
+}
+"""
+    java_parsed = parser.parse_code("src/SecurityConfig.java", java_code, "java", "org1", "repo1", "sha1", "spring", "boot")
+    assert java_parsed.language == "java"
+    j_kinds = {e["kind"] for e in java_parsed.entities}
+    assert "module" in j_kinds
+    assert "class" in j_kinds
+    assert "function" in j_kinds
+    assert any(e["name"] == "configureAuth" for e in java_parsed.entities)
+
+    # 2. TypeScript/JavaScript Parsing
+    ts_code = """
+import { Router } from "express";
+
+export class ApiGateway {
+    public route(): void {}
+}
+
+export const createServer = (port: number) => {
+    return port;
+};
+"""
+    ts_parsed = parser.parse_code("src/gateway.ts", ts_code, "typescript", "org1", "repo1", "sha1", "express", "app")
+    assert ts_parsed.language == "typescript"
+    ts_kinds = {e["kind"] for e in ts_parsed.entities}
+    assert "module" in ts_kinds
+    assert "class" in ts_kinds
+    assert "function" in ts_kinds
+
+    # 3. Go Parsing
+    go_code = """
+package router
+
+type Engine struct {
+    trees methodTrees
+}
+
+func (engine *Engine) ServeHTTP(w ResponseWriter, req *Request) {
+}
+"""
+    go_parsed = parser.parse_code("pkg/router.go", go_code, "go", "org1", "repo1", "sha1", "gin", "gin")
+    assert go_parsed.language == "go"
+    go_kinds = {e["kind"] for e in go_parsed.entities}
+    assert "module" in go_kinds
+    assert "class" in go_kinds
+    assert "function" in go_kinds
+
+
+def test_multilang_chunking():
+    java_sample = """
+package com.demo;
+
+public class A {
+    void one() {}
+}
+
+public class B {
+    void two() {}
+}
+"""
+    chunks = parser.chunk_file("A.java", java_sample, "java", "org1", "repo1", "sha1", "demo", "demo")
+    assert len(chunks) >= 1
+    assert all(c.language == "java" for c in chunks)
+
+
+
 def test_compose_deterministic_abstain():
     ans, ids, abstained, conf = compose_deterministic("Random question", "why", [], {})
     assert abstained is True
