@@ -78,3 +78,13 @@ def test_document_has_main_landmark():
     assert "<main" in app_tsx and "</main>" in app_tsx, "Splash view must contain a <main> landmark"
     assert "<main" in layout_tsx and "</main>" in layout_tsx, "Layout component must contain a <main> landmark"
 
+
+def test_login_content_contained_in_landmarks():
+    login_tsx = Path("frontend/src/pages/Login.tsx").read_text(encoding="utf-8")
+
+    # WCAG rule region requires all content to be contained in landmarks
+    # The aside must be an <aside> landmark with an accessible label
+    assert "<aside" in login_tsx and "</aside>" in login_tsx, "Login aside content must be wrapped in <aside> landmark"
+    assert 'aria-label=' in login_tsx, "Login aside landmark must have an accessible label"
+
+

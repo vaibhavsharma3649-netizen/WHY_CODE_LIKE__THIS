@@ -67,7 +67,7 @@ export function Login() {
 
   return (
     <div className="login">
-      <section className="login-aside">
+      <aside className="login-aside" aria-label="WhyCode overview">
         <div className="login-brand">
           <Mark size={34} />
           <span>WhyCode</span>
@@ -103,7 +103,7 @@ export function Login() {
           <span>pallets/flask</span>
           <span>Neo4j · MiniLM · FastAPI</span>
         </footer>
-      </section>
+      </aside>
 
       <main className="login-main" id="main-content">
         <div className="login-card">
