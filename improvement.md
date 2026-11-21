@@ -218,3 +218,114 @@ These are defects in the current code that could cause silent failure during liv
 
 * **2:15 - 3:00 | The Close (Enterprise Architecture):**
   > *"WhyCode combines Neo4j GraphRAG, multi-tenant isolation, decision supersession, and live agent memory. It doesn't just explain code—it preserves the engineering memory of your organisation."*
+
+---
+
+## 9. Post-Docx Strategic Additions: Top 3 Enterprise Features
+
+Based on the roadmap evaluation and venture capital pitch requirements, these three capabilities transform WhyCode from a passive search dashboard into an **active enterprise gatekeeper that companies cannot turn off**.
+
+```
+                              ┌─────────────────────────────────────────────────────────┐
+                              │            WhyCode Enterprise Knowledge Graph           │
+                              │                 (Neo4j 5.x / AuraDB)                    │
+                              └───────────────────────────┬─────────────────────────────┘
+                                                          │
+          ┌───────────────────────────────────────────────┼───────────────────────────────────────────────┐
+          ▼                                               ▼                                               ▼
+┌───────────────────────────────────┐   ┌───────────────────────────────────┐   ┌───────────────────────────────────┐
+│           FEATURE 1               │   │           FEATURE 2               │   │           FEATURE 3               │
+│     GitHub PR Guardian Bot        │   │    Brain-Drain Harvester          │   │      Decision Self-Healing        │
+│    (Automated Merge Blocker)      │   │  (Departing Senior Interviewer)   │   │     (Ghost Invariant Drift)       │
+└─────────────────┬─────────────────┘   └─────────────────┬─────────────────┘   └─────────────────┬─────────────────┘
+                  │                                       │                                       │
+                  ▼                                       ▼                                       ▼
+     Fails CI status check if                Targeted Q&A on high-churn              Compares graph edges to fresh AST;
+   code breaks un-superseded ADR           modules before developer exits           auto-proposes deprecation PRs
+```
+
+### 9.1 Feature 1: The GitHub PR Invariant Guardian (Automated Merge Blocker)
+* **The Problem:** Developers and AI coding agents forget to open dashboards. If WhyCode is merely a website, agents and juniors will bypass it and merge regressions.
+* **What it Does:** A native GitHub App / GitHub Action that triggers automatically on every opened Pull Request.
+* **How it Works with Neo4j:**
+  1. Inspects the PR diff, extracting modified files, functions, and deleted code.
+  2. Traverses Neo4j for 3-hop blast radius, active decisions, and linked security tradeoffs.
+  3. Posts an interactive **PR Invariant Report** comment directly on the GitHub PR:
+     > 🛑 **WhyCode Guardrail: Merge Blocked**  
+     > *PR #142 attempts to replace `hashlib.sha1` in `sessions.py`.*  
+     > * **Threatened Invariant:** Decision #5460 (Maintains HMAC cookie validity for 1.4M mobile clients).  
+     > * **Resurrected CVE:** Bandit B324.  
+     > * **Action Required:** Add `Supersedes: Decision #5460` with approved justification in PR description, or request override from `@davidism` (Staff Architect).*
+  4. Sets the commit status check to **`FAILED`** until the invariant is explicitly superseded or approved by a maintainer.
+* **Enterprise Value:** Provides **100% automated enforcement** in existing developer workflows with zero manual friction.
+
+---
+
+### 9.2 Feature 2: The Departing Developer "Brain-Drain" Harvester
+* **The Problem:** When a senior engineer leaves a company (2-weeks notice), their tacit mental model vanishes. Teams spend months trying to figure out *"Why on earth was this written this way?"*
+* **What it Does:** An automated offboarding engine that proactively interviews the departing developer based on repository history.
+* **How it Works with Neo4j:**
+  1. WhyCode computes a Git authorship & complexity heatmap: identifies modules where this developer has $>60\%$ authorship but **zero written ADRs or decisions**.
+  2. The LLM generates 5–8 targeted, highly specific architectural questions:
+     > *"Sarah, in `auth/token.py` (lines 45–80), you implemented a custom sliding window rate limiter instead of using Redis. Why?"*
+  3. The engineer answers via voice transcript or text in a clean 10-minute web flow.
+  4. WhyCode extracts the invariants, generates verifiable `Decision` nodes in Neo4j, and attributes them permanently to Sarah.
+* **Enterprise Value:** Solves a multi-million-dollar ramp-up bottleneck for IT consultancies (TCS, Infosys, Wipro) and fast-growing tech scaleups.
+
+---
+
+### 9.3 Feature 3: Self-Healing Decision Drift & "Ghost Invariant" Detector
+* **The Problem:** In fast-moving software, old decisions rot. A decision made in 2022 to support Python 3.8 becomes a "ghost invariant" after Python 3.8 is dropped. Without cleanup, your graph fills with obsolete rules.
+* **What it Does:** A continuous background daemon that monitors code changes and flags decisions that no longer match reality.
+* **How it Works with Neo4j:**
+  1. Runs periodic Cypher traversal comparing `(d:Decision)-[:AFFECTS]->(e:CodeEntity)` against current AST signatures and call graphs.
+  2. If the function was deleted, renamed, or its core dependencies were replaced without updating the decision, WhyCode flags: `status: 'drift_detected'`.
+  3. Generates an automated **Architecture Cleanup PR** proposing to deprecate or update the decision:
+     > *"Decision #302 mandated synchronous logging for AWS CloudWatch. However, PR #811 migrated the repo to Datadog async tracing. Should Decision #302 be marked SUPERSEDED?"*
+* **Enterprise Value:** Destroys the #1 objection enterprise CTOs have: *"Who is going to maintain this knowledge graph?"* With self-healing, the graph maintains itself.
+
+---
+
+## 10. Re-Engineering the Sandbox: Safe Invariant Regression Sandbox
+
+The original proposal in `WhyCode_Improvement_Plan.docx` flagged an *"Exploitability sandbox (flagged, high risk) — would generate & run exploit code to confirm a finding"*.
+
+### Why Weaponized Exploit Generation is an Enterprise Red Flag
+1. **Legal & InfoSec Veto:** Generating and executing real exploit payloads (SQLi, buffer overflows, RCE scripts) will be immediately banned by enterprise CISOs and flagged as malware generation by corporate SOCs.
+2. **High Brittle Failure:** Running exploit scripts against live code requires complex live database fixtures and network mocks, failing >70% of the time.
+
+### The Enterprise Solution: "The Invariant Regression Sandbox"
+Instead of weaponized attacks, WhyCode provides a non-destructive verification sandbox:
+* When an AI agent or engineer proposes a change, WhyCode spins up an ephemeral test container.
+* Runs the **affected regression test suite** identified by Neo4j's 3-hop caller graph.
+* Formally asserts that the **recorded architectural invariant** was not broken.
+* **Result:** 100% legal, 100% safe, SOC2/ISO compliant, and directly shippable into enterprise CI/CD pipelines.
+
+---
+
+## 11. Commercial Go-To-Market: The 5-Customer Matrix
+
+WhyCode unifies all 5 customer groups from the docx under a single high-margin business model:
+
+| Customer Group | Economic Buyer | Burning Pain | Commercial Willingness to Pay |
+| :--- | :--- | :--- | :--- |
+| **1. Tech Scaleups** *(Google, Stripe, Razorpay, Zomato)* | **VP of Engineering / Head of Platform** | AI coding agents generating breaking changes; senior leads bogged down reviewing agent PRs | **$25 – $40 / dev / month** (Bottom-up seat expansion). |
+| **2. IT Services & Consultancies** *(TCS, Infosys, Wipro, Accenture)* | **Delivery Head / Practice Lead** | 25%+ annual developer turnover on client codebases; 4-week ramp-up per new contractor | **$50,000 – $150,000 / engagement** (Sold on billable hour efficiency). |
+| **3. Regulated Enterprise** *(JPMorgan, PayPal, Revolut, PhonePe)* | **CISO & Head of Compliance** | Auditor questions: *"Why was this security finding accepted?"* taking weeks of manual archaeology | **$60,000 – $120,000 ARR** (Comes from compliance / audit preparation budget). |
+| **4. AI Coding Agent Teams** *(Claude Code, Cursor, Copilot)* | **Engineering Managers** | AI agents lack organizational context and delete intentional backward-compatibility code | **$20 – $35 / dev / month** (Self-serve MCP subscription). |
+| **5. Open-Source Foundations** *(Kubernetes, Apache, Linux Foundation)* | **Foundation Leadership** | Rotating volunteer maintainers; decisions buried in 10-year-old closed issues | **Free Community Tier** (Serves as bottom-up enterprise adoption flywheel). |
+
+---
+
+## 12. Startup Investor Q&A & YC-Grade Defense
+
+When presenting WhyCode to venture capitalists (Y Combinator, seed funds, angels):
+
+* **Q: "Won't GitHub Copilot or Cursor build this?"**  
+  * **A:** *"GitHub and Cursor focus on the token-generation and IDE layer. But enterprise architecture spans multiple repos, Jira tickets, Slack discussions, and historical PRs across teams. Microsoft's Copilot uses local file context and basic semantic search—they do not maintain a stateful, multi-tenant property graph of temporal decision supersession. WhyCode is model-agnostic: whether you use Cursor, Claude Code, or Codex, WhyCode is the neutral invariant layer."*
+
+* **Q: "How do you keep the graph clean without manual engineer effort?"**  
+  * **A:** *"Engineers hate writing docs. WhyCode requires zero manual input. We extract decisions passively from Git merge commits, PR discussion threads, and code reviews. When a PR is merged, WhyCode auto-mines the rationale, links it to AST entities, and runs Feature 3 (Self-Healing Drift) to deprecate obsolete rules automatically."*
+
+* **Q: "What is your Day-1 revenue milestone to reach $1M ARR?"**  
+  * **A:** *"10 enterprise consultancy accounts at $50k/year ($500k) + 1,400 dev seats at $30/month ($504k) = $1,004,000 ARR. We land bottom-up via our free MCP server in Cursor/Claude Code, and expand top-down to Engineering VPs when team PRs start failing invariant checks."*

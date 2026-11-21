@@ -11,6 +11,7 @@ import {
   Network,
   Scale,
   ShieldAlert,
+  ShieldCheck,
   ClipboardList,
   Settings2,
 } from "lucide-react";
@@ -18,6 +19,7 @@ import type { Role } from "./types";
 
 export type PageKey =
   | "overview"
+  | "invariants"
   | "ask"
   | "handover"
   | "security"
@@ -36,17 +38,17 @@ export const ROLE_LABEL: Record<Role, string> = {
 export const ROLE_HOME: Record<Role, PageKey> = {
   admin: "overview",
   maintainer: "overview",
-  developer: "ask",
-  security_reviewer: "security",
+  developer: "invariants",
+  security_reviewer: "invariants",
   reader: "overview",
 };
 
 const ROLE_NAV: Record<Role, PageKey[]> = {
-  admin: ["overview", "admin", "agent", "ask", "handover", "security", "graph"],
-  maintainer: ["overview", "ask", "handover", "security", "agent", "graph"],
-  developer: ["ask", "handover", "overview", "graph", "security", "agent"],
-  security_reviewer: ["security", "ask", "agent", "graph", "handover", "overview"],
-  reader: ["overview", "ask", "handover", "security", "graph", "agent"],
+  admin: ["overview", "invariants", "admin", "agent", "ask", "handover", "security", "graph"],
+  maintainer: ["overview", "invariants", "ask", "handover", "security", "agent", "graph"],
+  developer: ["invariants", "ask", "handover", "overview", "graph", "security", "agent"],
+  security_reviewer: ["invariants", "security", "ask", "agent", "graph", "handover", "overview"],
+  reader: ["overview", "invariants", "ask", "handover", "security", "graph", "agent"],
 };
 
 export interface NavItem {
@@ -58,6 +60,7 @@ export interface NavItem {
 
 export const NAV: NavItem[] = [
   { key: "overview", label: "Overview", icon: LayoutDashboard, hint: "Repository memory at a glance" },
+  { key: "invariants", label: "Invariant Oracle", icon: ShieldCheck, hint: "Test synthesis & auto-repair studio" },
   { key: "ask", label: "Ask", icon: MessageSquareText, hint: "Grounded answers with evidence" },
   { key: "handover", label: "Handover", icon: ClipboardList, hint: "What a new engineer needs" },
   { key: "security", label: "Security", icon: ShieldAlert, hint: "Signals and linked rationale" },

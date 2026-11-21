@@ -5,6 +5,7 @@ import { Mark } from "./components/Mark";
 import { Login } from "./pages/Login";
 import { Overview } from "./pages/Overview";
 import { Ask } from "./pages/Ask";
+import { Invariants } from "./pages/Invariants";
 import { Handover } from "./pages/Handover";
 import { Security } from "./pages/Security";
 import { Agent } from "./pages/Agent";
@@ -14,6 +15,7 @@ import { ROLE_HOME, type PageKey } from "./nav";
 
 const PAGES: PageKey[] = [
   "overview",
+  "invariants",
   "ask",
   "handover",
   "security",
@@ -67,6 +69,7 @@ export default function App() {
   return (
     <Layout page={activePage} onNavigate={navigate}>
       {activePage === "overview" ? <Overview onNavigate={navigate} /> : null}
+      {activePage === "invariants" ? <Invariants /> : null}
       {activePage === "ask" ? <Ask /> : null}
       {activePage === "handover" ? <Handover /> : null}
       {activePage === "security" ? <Security /> : null}

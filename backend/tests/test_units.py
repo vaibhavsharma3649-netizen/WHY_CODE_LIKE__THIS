@@ -177,3 +177,24 @@ def test_evidence_block():
     assert "func1" in block
     assert "[ev2]" in block
 
+
+def test_invariants_endpoints():
+    from app.api import list_invariant_scenarios, verify_invariant
+
+    scenarios = list_invariant_scenarios()
+    assert len(scenarios) >= 2
+    assert scenarios[0]["invariant_id"] == "INV-5460"
+
+    # Test failed verification on naive patch
+    naive_result = verify_invariant({"scenario_id": "scenario-1", "patch": "def verify(): return True"})
+    assert naive_result["oracle_status"] == "FAILED"
+    assert naive_result["regressions_detected"] == 1
+    assert naive_result["exploit_neutralized"] is False
+
+    # Test passed verification on safe dual-adapter patch
+    safe_result = verify_invariant({"scenario_id": "scenario-1", "patch": "def verify(): return dual_adapter_verify_sha1()"})
+    assert safe_result["oracle_status"] == "PASSED"
+    assert safe_result["regressions_detected"] == 0
+    assert safe_result["exploit_neutralized"] is True
+
+
