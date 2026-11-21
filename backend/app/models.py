@@ -20,15 +20,60 @@ class MembershipOut(BaseModel):
 
 class TokenResponse(BaseModel):
     token: str
+    refresh_token: str = ""
     user: dict[str, Any]
     memberships: list[MembershipOut]
     active_org: MembershipOut
+    must_change_password: bool = False
 
 
 class MeResponse(BaseModel):
     user: dict[str, Any]
     memberships: list[MembershipOut]
     active_org: MembershipOut
+    must_change_password: bool = False
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str | None = None
+    all_devices: bool = False
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class GitHubExchangeRequest(BaseModel):
+    code: str
+
+
+class UserCreate(BaseModel):
+    email: str
+    name: str = ""
+    role: Role = "reader"
+    password: str | None = None
+
+
+class UserUpdate(BaseModel):
+    role: Role | None = None
+    status: Literal["active", "disabled"] | None = None
+
+
+class PasswordResetRequest(BaseModel):
+    password: str | None = None
+
+
+class RepoCreate(BaseModel):
+    full_name: str | None = None
+    owner: str | None = None
+    name: str | None = None
+    branch: str | None = None
+    pinned_prs: list[int] = Field(default_factory=list, max_length=20)
 
 
 class AskTurn(BaseModel):

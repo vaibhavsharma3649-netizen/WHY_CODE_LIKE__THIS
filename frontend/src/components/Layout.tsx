@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { ChevronDown, LogOut, RefreshCw, RotateCw } from "lucide-react";
+import { useState, type FormEvent, type ReactNode } from "react";
+import { ChevronDown, KeyRound, LogOut, RefreshCw, RotateCw, Settings2 } from "lucide-react";
 import { Mark } from "./Mark";
 import { useAuth } from "../auth";
 import { navForRole, type PageKey } from "../nav";
@@ -34,10 +34,15 @@ export function Layout({
   onNavigate: (page: PageKey) => void;
   children: ReactNode;
 }) {
-  const { user, org, role, memberships, repos, repo, repoId, setRepoId, switchOrg, signOut } = useAuth();
+  const { user, org, role, memberships, repos, repo, repoId, setRepoId, switchOrg, signOut, reloadRepos, mustChangePassword, changePassword } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
   const [toast, setToast] = useToast();
+  const [pwCurrent, setPwCurrent] = useState("");
+  const [pwNext, setPwNext] = useState("");
+  const [pwError, setPwError] = useState<string | null>(null);
+  const [pwBusy, setPwBusy] = useState(false);
   const canRefresh = role === "admin" || role === "maintainer";
+  const canAdmin = role === "admin";
   const nav = navForRole(role);
   const primaryPage: PageKey =
     role === "security_reviewer" ? "security" : role === "developer" ? "ask" : "ask";
@@ -49,11 +54,24 @@ export function Layout({
     setRefreshing(true);
     try {
       await refreshRepo(repoId);
+      await reloadRepos();
       setToast("Reindex queued. The graph will update when ingestion finishes.");
     } catch (error) {
       setToast(errorText(error));
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const onSubmitPassword = async (event: FormEvent) => {
+    event.preventDefault();
+    setPwBusy(true);
+    setPwError(null);
+    try {
+      await changePassword(pwCurrent, pwNext);
+    } catch (error) {
+      setPwError(errorText(error));
+      setPwBusy(false);
     }
   };
 
@@ -120,7 +138,7 @@ export function Layout({
               <strong>{user?.name ?? "Signed in"}</strong>
               <span>{user?.email}</span>
             </span>
-            <button type="button" className="icon-btn" onClick={signOut} title="Sign out" aria-label="Sign out">
+            <button type="button" className="icon-btn" onClick={() => void signOut()} title="Sign out" aria-label="Sign out">
               <LogOut size={15} />
             </button>
           </div>
@@ -156,9 +174,16 @@ export function Layout({
                 {shortSha(repo.indexed_sha)}
               </span>
             ) : null}
-            <Pill tone="ok">
+            <Pill
+              tone={repo?.sync_status === "failed" ? "red" : repo?.sync_status === "queued" ? "warn" : "ok"}
+              title={repo?.error_text ?? "Repository sync status"}
+            >
               <span className="live-dot" />
-              Indexed
+              {repo?.sync_status === "failed"
+                ? "Sync failed"
+                : repo?.sync_status === "queued"
+                  ? "Queued"
+                  : "Indexed"}
             </Pill>
           </div>
 
@@ -168,11 +193,22 @@ export function Layout({
                 type="button"
                 className="btn btn-ghost btn-sm refresh-btn"
                 onClick={onRefresh}
-                disabled={refreshing || !repoId}
+                disabled={refreshing || !repoId || repo?.sync_status === "queued"}
                 title="Queue a reindex"
               >
                 <RefreshCw size={14} className={refreshing ? "spin" : undefined} />
                 {refreshing ? "Queueing" : "Refresh"}
+              </button>
+            ) : null}
+            {canAdmin ? (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => onNavigate("admin")}
+                title="Manage people, repositories, and audit"
+              >
+                <Settings2 size={14} />
+                Manage
               </button>
             ) : null}
             <span className="role-chip">{role ? ROLE_LABEL[role] : ""}</span>
@@ -189,6 +225,44 @@ export function Layout({
         <div className="toast" role="status">
           <RotateCw size={14} />
           <span>{toast}</span>
+        </div>
+      ) : null}
+
+      {mustChangePassword ? (
+        <div className="modal-backdrop">
+          <form className="modal-card" onSubmit={onSubmitPassword}>
+            <span className="modal-icon"><KeyRound size={19} /></span>
+            <h2>Set your password</h2>
+            <p>
+              An administrator created or reset your password. Choose a new one before continuing.
+              You will be asked to sign in again.
+            </p>
+            <label>
+              Temporary password
+              <input
+                type="password"
+                value={pwCurrent}
+                onChange={(event) => setPwCurrent(event.target.value)}
+                autoComplete="current-password"
+                required
+              />
+            </label>
+            <label>
+              New password
+              <input
+                type="password"
+                value={pwNext}
+                onChange={(event) => setPwNext(event.target.value)}
+                autoComplete="new-password"
+                minLength={10}
+                required
+              />
+            </label>
+            {pwError ? <p className="form-error">{pwError}</p> : null}
+            <button type="submit" className="btn btn-primary" disabled={pwBusy}>
+              {pwBusy ? "Saving…" : "Save password"}
+            </button>
+          </form>
         </div>
       ) : null}
     </div>

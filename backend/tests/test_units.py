@@ -1,6 +1,18 @@
 import pytest
-from app.auth import hash_password, verify_password, create_token, decode_token, Principal
+from app.auth import (
+    Principal,
+    create_oauth_state,
+    create_token,
+    decode_oauth_state,
+    decode_token,
+    decode_token_claims,
+    hash_password,
+    hash_token,
+    normalize_email,
+    verify_password,
+)
 from app.embeddings import _hash_embed, cosine, tokenize_count, approx_tokens, DIM
+from app.github_auth import parse_repo_ref
 from app.llm import compose_deterministic, evidence_block, _history_block, _focus_block
 from app.ingest import parser
 from app.retrieval import classify, _fulltext_query, _identifiers, _rrf
@@ -19,6 +31,35 @@ def test_token_lifecycle():
     token = create_token(uid)
     decoded = decode_token(token)
     assert decoded == uid
+
+
+def test_access_token_version_claim():
+    claims = decode_token_claims(create_token("usr_test_123", 4))
+    assert claims["ver"] == 4
+    assert claims["typ"] == "access"
+
+
+def test_oauth_state_roundtrip():
+    state = create_oauth_state("github_login", "org_alpha")
+    payload = decode_oauth_state(state, "github_login")
+    assert payload["org"] == "org_alpha"
+    with pytest.raises(Exception):
+        decode_oauth_state(state, "github_install")
+
+
+def test_token_hashing_and_email_normalization():
+    raw = "refresh-token-value"
+    assert hash_token(raw) == hash_token(raw)
+    assert hash_token(raw) != hash_token("other")
+    assert normalize_email("  Ada@Whyc.Dev ") == "ada@whyc.dev"
+
+
+def test_repo_reference_parsing():
+    assert parse_repo_ref("pallets/flask") == ("pallets", "flask")
+    assert parse_repo_ref("https://github.com/pallets/flask.git") == ("pallets", "flask")
+    assert parse_repo_ref("github.com/alpha/ledger-core/") == ("alpha", "ledger-core")
+    with pytest.raises(ValueError):
+        parse_repo_ref("not-a-repo")
 
 
 def test_principal_role_rank():

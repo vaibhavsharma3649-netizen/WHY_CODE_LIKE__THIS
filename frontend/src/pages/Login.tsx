@@ -1,8 +1,10 @@
-import { useState, type FormEvent } from "react";
-import { ArrowRight, Check, Loader2, LockKeyhole } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { ArrowRight, Check, Github, Loader2, LockKeyhole } from "lucide-react";
 import { Mark } from "../components/Mark";
 import { useAuth } from "../auth";
+import { API_BASE, authConfig } from "../api";
 import { errorText } from "../hooks";
+import type { AuthConfig } from "../types";
 
 interface DemoAccount {
   email: string;
@@ -21,11 +23,31 @@ const DEMOS: DemoAccount[] = [
 ];
 
 export function Login() {
-  const { signIn } = useAuth();
+  const { signIn, completeGitHub } = useAuth();
   const [email, setEmail] = useState("ada@whyc.dev");
   const [password, setPassword] = useState("whyc-demo");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [config, setConfig] = useState<AuthConfig | null>(null);
+
+  useEffect(() => {
+    authConfig().then(setConfig).catch(() => setConfig(null));
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+    const oauthError = params.get("error");
+    if (oauthError) setError(`GitHub sign-in failed: ${oauthError}`);
+    if (!code) return;
+    setBusy("github");
+    completeGitHub(code)
+      .catch((err) => setError(errorText(err)))
+      .finally(() => {
+        setBusy(null);
+        window.history.replaceState({}, "", window.location.pathname + window.location.hash);
+      });
+  }, [completeGitHub]);
 
   const submit = async (nextEmail: string, nextPassword: string, marker: string) => {
     setBusy(marker);
@@ -117,6 +139,26 @@ export function Login() {
               {busy === "form" ? "Signing in…" : "Sign in"}
             </button>
           </form>
+
+          {config?.github_oauth ? (
+            <div className="oauth-block">
+              <span className="oauth-divider">or continue with</span>
+              <button
+                type="button"
+                className="btn btn-soft oauth-btn"
+                disabled={busy !== null}
+                onClick={() => {
+                  window.location.href = `${API_BASE}/auth/github/start`;
+                }}
+              >
+                <Github size={16} />
+                {busy === "github" ? "Connecting…" : "GitHub"}
+              </button>
+              <p className="oauth-note">
+                Company orgs require an admin invitation before GitHub access is granted.
+              </p>
+            </div>
+          ) : null}
 
           <div className="demo-block">
             <div className="demo-head">

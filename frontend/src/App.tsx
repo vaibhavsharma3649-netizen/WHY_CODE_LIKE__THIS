@@ -9,9 +9,18 @@ import { Handover } from "./pages/Handover";
 import { Security } from "./pages/Security";
 import { Agent } from "./pages/Agent";
 import { Graph } from "./pages/Graph";
+import { Admin } from "./pages/Admin";
 import { ROLE_HOME, type PageKey } from "./nav";
 
-const PAGES: PageKey[] = ["overview", "ask", "handover", "security", "agent", "graph"];
+const PAGES: PageKey[] = [
+  "overview",
+  "ask",
+  "handover",
+  "security",
+  "agent",
+  "graph",
+  "admin",
+];
 
 function readPage(): PageKey {
   const raw = window.location.hash.replace(/^#\/?/, "");
@@ -53,14 +62,17 @@ export default function App() {
   if (!ready) return <Splash />;
   if (!user) return <Login />;
 
+  const activePage: PageKey = page === "admin" && role !== "admin" ? "overview" : page;
+
   return (
-    <Layout page={page} onNavigate={navigate}>
-      {page === "overview" ? <Overview onNavigate={navigate} /> : null}
-      {page === "ask" ? <Ask /> : null}
-      {page === "handover" ? <Handover /> : null}
-      {page === "security" ? <Security /> : null}
-      {page === "agent" ? <Agent /> : null}
-      {page === "graph" ? <Graph /> : null}
+    <Layout page={activePage} onNavigate={navigate}>
+      {activePage === "overview" ? <Overview onNavigate={navigate} /> : null}
+      {activePage === "ask" ? <Ask /> : null}
+      {activePage === "handover" ? <Handover /> : null}
+      {activePage === "security" ? <Security /> : null}
+      {activePage === "agent" ? <Agent /> : null}
+      {activePage === "graph" ? <Graph /> : null}
+      {activePage === "admin" ? <Admin onNavigate={navigate} /> : null}
     </Layout>
   );
 }

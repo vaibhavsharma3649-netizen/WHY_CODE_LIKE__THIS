@@ -12,10 +12,18 @@ import {
   Scale,
   ShieldAlert,
   ClipboardList,
+  Settings2,
 } from "lucide-react";
 import type { Role } from "./types";
 
-export type PageKey = "overview" | "ask" | "handover" | "security" | "agent" | "graph";
+export type PageKey =
+  | "overview"
+  | "ask"
+  | "handover"
+  | "security"
+  | "agent"
+  | "graph"
+  | "admin";
 
 export const ROLE_LABEL: Record<Role, string> = {
   admin: "Admin",
@@ -34,7 +42,7 @@ export const ROLE_HOME: Record<Role, PageKey> = {
 };
 
 const ROLE_NAV: Record<Role, PageKey[]> = {
-  admin: ["overview", "agent", "ask", "handover", "security", "graph"],
+  admin: ["overview", "admin", "agent", "ask", "handover", "security", "graph"],
   maintainer: ["overview", "ask", "handover", "security", "agent", "graph"],
   developer: ["ask", "handover", "overview", "graph", "security", "agent"],
   security_reviewer: ["security", "ask", "agent", "graph", "handover", "overview"],
@@ -55,6 +63,7 @@ export const NAV: NavItem[] = [
   { key: "security", label: "Security", icon: ShieldAlert, hint: "Signals and linked rationale" },
   { key: "agent", label: "Agent", icon: Bot, hint: "Persistent, resumable context" },
   { key: "graph", label: "Graph", icon: Network, hint: "The memory structure" },
+  { key: "admin", label: "Admin", icon: Settings2, hint: "People, repositories, and audit" },
 ];
 
 export function navForRole(role: Role | null): NavItem[] {

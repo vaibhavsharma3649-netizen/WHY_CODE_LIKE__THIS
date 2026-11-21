@@ -6,6 +6,9 @@ from .config import settings
 UNIQUE = [
     ("Organization", "org_id"),
     ("User", "user_id"),
+    ("User", "github_id"),
+    ("RefreshToken", "token_hash"),
+    ("LoginCode", "code_hash"),
     ("Repository", "repo_id"),
     ("File", "file_id"),
     ("CodeEntity", "entity_id"),
@@ -35,6 +38,10 @@ RANGE = [
     ("AgentRun", "repo_id"),
     ("AuditEvent", "org_id"),
     ("User", "email"),
+    ("RefreshToken", "user_id"),
+    ("RefreshToken", "expires_at"),
+    ("LoginCode", "expires_at"),
+    ("Organization", "github_installation_id"),
 ]
 
 

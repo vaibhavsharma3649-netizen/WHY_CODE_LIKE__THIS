@@ -21,9 +21,12 @@ interface AuthContextValue {
   repo: Repo | null;
   setRepoId: (repoId: string) => void;
   signIn: (email: string, password: string) => Promise<void>;
-  signOut: () => void;
+  signOut: () => Promise<void>;
   switchOrg: (orgId: string) => Promise<void>;
   reloadRepos: () => Promise<void>;
+  mustChangePassword: boolean;
+  completeGitHub: (code: string) => Promise<void>;
+  changePassword: (current: string, next: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -40,6 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [org, setOrg] = useState<Membership | null>(null);
   const [repos, setRepos] = useState<Repo[]>([]);
   const [repoId, setRepoIdState] = useState<string | null>(client.session.repo());
+  const [mustChangePassword, setMustChangePassword] = useState(false);
 
   const loadRepos = useCallback(async () => {
     const data = await client.listRepos();
@@ -69,6 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(data.user);
         setMemberships(data.memberships);
         setOrg(data.active_org);
+        setMustChangePassword(data.must_change_password);
         await loadRepos();
       } catch {
         client.session.clear();
@@ -87,18 +92,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(data.user);
       setMemberships(data.memberships);
       setOrg(data.active_org);
+      setMustChangePassword(data.must_change_password);
       await loadRepos();
     },
     [loadRepos],
   );
 
-  const signOut = useCallback(() => {
+  const completeGitHub = useCallback(
+    async (code: string) => {
+      const data = await client.githubExchange(code);
+      setUser(data.user);
+      setMemberships(data.memberships);
+      setOrg(data.active_org);
+      setMustChangePassword(data.must_change_password);
+      await loadRepos();
+    },
+    [loadRepos],
+  );
+
+  const changePassword = useCallback(async (current: string, next: string) => {
+    await client.changePassword(current, next);
     client.session.clear();
     setUser(null);
     setMemberships([]);
     setOrg(null);
     setRepos([]);
     setRepoIdState(null);
+    setMustChangePassword(false);
+  }, []);
+
+  const signOut = useCallback(async () => {
+    try {
+      await client.logout();
+    } finally {
+      client.session.clear();
+      setUser(null);
+      setMemberships([]);
+      setOrg(null);
+      setRepos([]);
+      setRepoIdState(null);
+      setMustChangePassword(false);
+    }
   }, []);
 
   const switchOrg = useCallback(
@@ -138,6 +172,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signOut,
     switchOrg,
     reloadRepos: loadRepos,
+    mustChangePassword,
+    completeGitHub,
+    changePassword,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

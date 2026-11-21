@@ -11,14 +11,15 @@ from ..config import settings
 
 
 class GitHub:
-    def __init__(self) -> None:
+    def __init__(self, token: str | None = None) -> None:
         headers = {
             "Accept": "application/vnd.github+json",
             "User-Agent": "whycoded-prototype",
             "X-GitHub-Api-Version": "2022-11-28",
         }
-        if settings.github_token:
-            headers["Authorization"] = f"Bearer {settings.github_token}"
+        credential = token or settings.github_token
+        if credential:
+            headers["Authorization"] = f"Bearer {credential}"
         self.client = httpx.Client(headers=headers, timeout=30.0, follow_redirects=True)
 
     def close(self) -> None:
@@ -66,7 +67,7 @@ class GitHub:
         if dest.exists() and any(dest.iterdir()):
             return dest
         dest.mkdir(parents=True, exist_ok=True)
-        url = f"https://codeload.github.com/{owner}/{name}/zip/{ref}"
+        url = f"{settings.github_api}/repos/{owner}/{name}/zipball/{ref}"
         with self.client.stream("GET", url, timeout=120.0) as response:
             response.raise_for_status()
             payload = b"".join(response.iter_bytes())

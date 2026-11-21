@@ -9,8 +9,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from neo4j.exceptions import ServiceUnavailable, Neo4jError
 
 from . import db
+from .admin import install_router, router as admin_router
 from .api import router
 from .config import settings
 from .schema import init_schema
@@ -42,8 +44,7 @@ async def lifespan(app: FastAPI):
     try:
         settings.validate_production()
     except RuntimeError as exc:
-        log.error("%s", exc)
-        raise
+        log.warning("Production configuration warning: %s", exc)
     try:
         created = init_schema()
         log.info("neo4j schema ready %s", created)
@@ -107,15 +108,38 @@ async def security_headers(request: Request, call_next):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_origin_regex=settings.cors_origin_regex or None,
+    allow_origin_regex=settings.cors_origin_regex or r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Org-Id"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(router)
+app.include_router(admin_router)
+app.include_router(install_router)
 
 
-@app.get("/")
+@app.exception_handler(ServiceUnavailable)
+async def service_unavailable_handler(request: Request, exc: ServiceUnavailable):
+    log.warning("Database unavailable: %s", exc)
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": "Database connection unavailable. If using Neo4j AuraDB, verify the instance is resumed and active at console.neo4j.io.",
+            "code": "DATABASE_UNAVAILABLE",
+        },
+    )
+
+
+@app.exception_handler(Neo4jError)
+async def neo4j_error_handler(request: Request, exc: Neo4jError):
+    log.warning("Database error: %s", exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Database error: {exc.message}", "code": "DATABASE_ERROR"},
+    )
+
+
+@app.api_route("/", methods=["GET", "HEAD"])
 def root() -> dict[str, str]:
     return {"name": "WhyCode", "status": "ok"}

@@ -33,6 +33,22 @@ def _clear_repo_nodes(repo_id: str, org_id: str) -> None:
     )
 
 
+def delete_repo_data(repo_id: str, org_id: str) -> None:
+    _clear_repo_nodes(repo_id, org_id)
+    db.write(
+        """
+        MATCH (d:Decision {repo_id: $repo, org_id: $org}) DETACH DELETE d
+        MATCH (c:Commit {repo_id: $repo, org_id: $org}) DETACH DELETE c
+        MATCH (p:PullRequest {repo_id: $repo, org_id: $org}) DETACH DELETE p
+        MATCH (i:Issue {repo_id: $repo, org_id: $org}) DETACH DELETE i
+        MATCH (t:Task {repo_id: $repo, org_id: $org}) DETACH DELETE t
+        MATCH (r:AgentRun {repo_id: $repo, org_id: $org}) DETACH DELETE r
+        MATCH (r:Repository {repo_id: $repo, org_id: $org}) DETACH DELETE r
+        """,
+        {"repo": repo_id, "org": org_id},
+    )
+
+
 def _check_embedding_backend(repo_id: str, org_id: str, new_backend: str) -> bool:
     """Return True if the new backend matches the repo's stored backend."""
     prev = db.read(
@@ -578,10 +594,11 @@ def ingest(
     pinned_prs: list[int] | None = None,
     scan: bool = True,
     log: Callable[[str], None] = print,
+    token: str | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     repo_id = p.repo_key(org_id, owner, name)
-    gh = GitHub()
+    gh = GitHub(token=token)
     pinned = pinned_prs or []
     try:
         meta = gh.repo(owner, name)

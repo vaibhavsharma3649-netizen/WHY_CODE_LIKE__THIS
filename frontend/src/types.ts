@@ -10,6 +10,55 @@ export interface User {
   user_id: string;
   email: string;
   name: string;
+  github_login?: string | null;
+  last_login_at?: string | null;
+}
+
+export interface AuthConfig {
+  password_login: boolean;
+  github_oauth: boolean;
+  github_app: boolean;
+  frontend_url: string;
+}
+
+export interface AdminUser {
+  user: User;
+  role: Role;
+  membership_status: string;
+  memberships: Membership[];
+}
+
+export interface AdminRepo extends Repo {
+  counts?: RepoCounts;
+  sync_status?: string;
+  error_text?: string | null;
+}
+
+export interface GithubStatus {
+  app_configured: boolean;
+  app_installed: boolean;
+  install_url: string | null;
+  token_configured: boolean;
+}
+
+export interface GithubRepo {
+  full_name: string;
+  description?: string | null;
+  private: boolean;
+  default_branch: string;
+  url?: string | null;
+}
+
+export interface AuditEvent {
+  event_id: string;
+  org_id: string;
+  actor_id: string;
+  action: string;
+  target_id?: string | null;
+  timestamp: string;
+  outcome: string;
+  correlation_id?: string | null;
+  meta_json?: string | null;
 }
 
 export interface RepoCounts {
@@ -32,6 +81,7 @@ export interface Repo {
   last_synced_at?: string;
   url?: string;
   embedding_backend?: string;
+  error_text?: string | null;
   synthetic?: boolean;
   counts?: RepoCounts;
 }

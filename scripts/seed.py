@@ -39,7 +39,8 @@ def seed_orgs_users() -> None:
         db.write(
             """
             MERGE (o:Organization {org_id: $org})
-            SET o.name = $name, o.status = 'active', o.created_at = $now
+            SET o.name = $name, o.status = 'active', o.created_at = $now,
+                o.github_auto_join = coalesce(o.github_auto_join, false)
             """,
             {"org": org_id, "name": name, "now": datetime.now(timezone.utc).isoformat()},
         )
@@ -47,7 +48,10 @@ def seed_orgs_users() -> None:
         db.write(
             """
             MERGE (u:User {user_id: $uid})
-            SET u.email = $email, u.name = $name, u.password_hash = $hash, u.created_at = $now
+            SET u.email = $email, u.name = $name, u.password_hash = $hash, u.created_at = $now,
+                u.status = coalesce(u.status, 'active'),
+                u.token_version = coalesce(u.token_version, 0),
+                u.must_change_password = coalesce(u.must_change_password, false)
             WITH u
             MATCH (o:Organization {org_id: $org})
             MERGE (u)-[m:MEMBER_OF]->(o)

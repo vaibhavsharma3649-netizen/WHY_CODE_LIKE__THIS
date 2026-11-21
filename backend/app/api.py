@@ -3,20 +3,39 @@ from __future__ import annotations
 import json
 import re
 import time
+from datetime import datetime, timezone
 from typing import Any, Iterator
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi.responses import RedirectResponse, StreamingResponse
 
 from . import audit, db
 from .config import settings
 from .auth import (
     Principal,
+    consume_refresh_token,
     create_token,
+    decode_oauth_state,
+    generate_password,
     get_principal,
+    hash_password,
+    issue_refresh_token,
+    normalize_email,
     repo_for,
     require_roles,
+    revoke_refresh_token,
+    revoke_user_tokens,
+    validate_password,
     verify_password,
+)
+from .github_auth import (
+    complete_installation,
+    consume_login_code,
+    exchange_oauth_code,
+    github_identity,
+    ingest_token,
+    oauth_authorize_url,
+    resolve_github_identity,
 )
 from .ingest.pipeline import ingest
 from .llm import compose_deterministic, synth_stream, _compute_grounding_report
@@ -25,10 +44,14 @@ from .models import (
     AskResponse,
     Citation,
     FindingOut,
+    GitHubExchangeRequest,
     GraphResponse,
     HandoverResponse,
     LoginRequest,
+    LogoutRequest,
     MeResponse,
+    PasswordChangeRequest,
+    RefreshRequest,
     StepRequest,
     TaskCreate,
     TokenResponse,
@@ -57,7 +80,7 @@ def _memberships(principal_row: dict[str, Any]) -> list[dict[str, Any]]:
     )
 
 
-@router.get("/health")
+@router.api_route("/health", methods=["GET", "HEAD"])
 def health() -> dict[str, Any]:
     llm = {
         "enabled": settings.llm_enabled,
@@ -71,28 +94,197 @@ def health() -> dict[str, Any]:
     return {"status": "ok", "database": version, "llm": llm}
 
 
-@router.post("/auth/login", response_model=TokenResponse)
-def login(body: LoginRequest) -> TokenResponse:
-    user = db.read_one(
-        "MATCH (u:User {email: $email}) RETURN u {.*} AS u",
-        {"email": body.email.strip().lower()},
+def _issue_session(
+    user_id: str,
+    memberships: list[dict[str, Any]],
+    must_change_password: bool = False,
+    request: Request | None = None,
+) -> TokenResponse:
+    version = db.read_one(
+        "MATCH (u:User {user_id: $uid}) RETURN u.token_version AS ver", {"uid": user_id}
     )
-    if not user or not verify_password(body.password, user["u"].get("password_hash") or ""):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
-    row = user["u"]
-    memberships = _memberships(row)
-    if not memberships:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "No organisation membership")
+    token_version = int((version or {}).get("ver") or 0)
+    user = db.read_one(
+        "MATCH (u:User {user_id: $uid}) RETURN u {.*} AS user", {"uid": user_id}
+    )["user"]
+    refresh = issue_refresh_token(
+        user_id,
+        memberships[0]["org_id"],
+        request.headers.get("user-agent") if request else None,
+        request.client.host if request and request.client else None,
+    )
     return TokenResponse(
-        token=create_token(row["user_id"]),
-        user={"user_id": row["user_id"], "email": row["email"], "name": row.get("name")},
+        token=create_token(user_id, token_version),
+        refresh_token=refresh,
+        user={
+            "user_id": user_id,
+            "email": user.get("email"),
+            "name": user.get("name"),
+            "github_login": user.get("github_login"),
+        },
         memberships=memberships,
         active_org=memberships[0],
+        must_change_password=bool(must_change_password or user.get("must_change_password")),
     )
+
+
+def _active_memberships(user_id: str) -> list[dict[str, Any]]:
+    return db.read(
+        """
+        MATCH (u:User {user_id: $uid})-[m:MEMBER_OF {status: 'active'}]->(o:Organization)
+        RETURN o.org_id AS org_id, o.name AS org_name, m.role AS role
+        ORDER BY o.name
+        """,
+        {"uid": user_id},
+    )
+
+
+@router.get("/auth/config")
+def auth_config() -> dict[str, Any]:
+    return {
+        "password_login": True,
+        "github_oauth": settings.github_oauth_enabled,
+        "github_app": settings.github_app_enabled,
+        "frontend_url": settings.frontend_url,
+    }
+
+
+@router.post("/auth/login", response_model=TokenResponse)
+def login(body: LoginRequest, request: Request) -> TokenResponse:
+    email = normalize_email(body.email)
+    row = db.read_one(
+        "MATCH (u:User {email: $email}) RETURN u {.*} AS user",
+        {"email": email},
+    )
+    if not row or not verify_password(body.password, row["user"].get("password_hash") or ""):
+        audit.record("global", "anonymous", "auth.login", outcome="failed", meta={"email": email})
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
+    user = row["user"]
+    if (user.get("status") or "active") != "active":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Account is disabled")
+    memberships = _active_memberships(user["user_id"])
+    if not memberships:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "No organisation membership")
+    now = datetime.now(timezone.utc).isoformat()
+    db.write(
+        "MATCH (u:User {user_id: $uid}) SET u.last_login_at = $now",
+        {"uid": user["user_id"], "now": now},
+    )
+    audit.record(
+        memberships[0]["org_id"], user["user_id"], "auth.login", None, meta={"mode": "password"}
+    )
+    return _issue_session(
+        user["user_id"], memberships, bool(user.get("must_change_password")), request
+    )
+
+
+@router.post("/auth/refresh", response_model=TokenResponse)
+def refresh_session(body: RefreshRequest, request: Request) -> TokenResponse:
+    consumed = consume_refresh_token(body.refresh_token)
+    if not consumed:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session expired or already used")
+    memberships = _active_memberships(consumed["user_id"])
+    user = db.read_one(
+        "MATCH (u:User {user_id: $uid}) RETURN u {.*} AS user", {"uid": consumed["user_id"]}
+    )
+    if not user or (user["user"].get("status") or "active") != "active" or not memberships:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session is no longer valid")
+    session = _issue_session(
+        consumed["user_id"],
+        memberships,
+        bool(user["user"].get("must_change_password")),
+        request,
+    )
+    audit.record(memberships[0]["org_id"], consumed["user_id"], "auth.refresh")
+    return session
+
+
+@router.post("/auth/logout")
+def logout(body: LogoutRequest, principal: Principal = Depends(get_principal)) -> dict[str, str]:
+    if body.all_devices:
+        revoke_user_tokens(principal.user_id)
+    elif body.refresh_token:
+        revoke_refresh_token(body.refresh_token)
+    audit.record(principal.org_id, principal.user_id, "auth.logout")
+    return {"status": "ok"}
+
+
+@router.post("/auth/change-password")
+def change_password(
+    body: PasswordChangeRequest, principal: Principal = Depends(get_principal)
+) -> dict[str, str]:
+    row = db.read_one(
+        "MATCH (u:User {user_id: $uid}) RETURN u {.*} AS user", {"uid": principal.user_id}
+    )
+    if not row or not verify_password(body.current_password, row["user"].get("password_hash") or ""):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is incorrect")
+    validate_password(body.new_password, principal.email)
+    db.write(
+        """
+        MATCH (u:User {user_id: $uid})
+        SET u.password_hash = $hash, u.must_change_password = false,
+            u.token_version = coalesce(u.token_version, 0) + 1,
+            u.password_changed_at = $now
+        """,
+        {
+            "uid": principal.user_id,
+            "hash": hash_password(body.new_password),
+            "now": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    revoke_user_tokens(principal.user_id)
+    audit.record(principal.org_id, principal.user_id, "auth.password.change")
+    return {"status": "ok"}
+
+
+@router.get("/auth/github/start")
+def github_login_start(org_id: str | None = Query(default=None)) -> RedirectResponse:
+    if not settings.github_oauth_enabled:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "GitHub sign-in is not configured")
+    return RedirectResponse(oauth_authorize_url(org_id), status_code=302)
+
+
+@router.get("/auth/github/callback")
+def github_login_callback(code: str, state: str) -> RedirectResponse:
+    try:
+        payload_state = decode_oauth_state(state, "github_login")
+        token = exchange_oauth_code(code)
+        identity = github_identity(token)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    resolved = resolve_github_identity(identity, payload_state.get("org"))
+    if not resolved["memberships"]:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Your GitHub account has no organization membership. Ask an admin to invite you.",
+        )
+    org_id = resolved["org_id"]
+    audit.record(org_id, resolved["user_id"], "auth.login", None, meta={"mode": "github"})
+    login_code = issue_login_code(resolved["user_id"], org_id)
+    return RedirectResponse(
+        f"{settings.frontend_url.rstrip('/')}/?code={login_code}", status_code=302
+    )
+
+
+@router.post("/auth/github/exchange", response_model=TokenResponse)
+def github_exchange(body: GitHubExchangeRequest, request: Request) -> TokenResponse:
+    consumed = consume_login_code(body.code)
+    if not consumed:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired sign-in code")
+    memberships = _active_memberships(consumed["user_id"])
+    if not memberships:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "No active organisation membership")
+    session = _issue_session(consumed["user_id"], memberships, request=request)
+    audit.record(memberships[0]["org_id"], consumed["user_id"], "auth.login.exchange")
+    return session
 
 
 @router.get("/me", response_model=MeResponse)
 def me(principal: Principal = Depends(get_principal)) -> MeResponse:
+    change_row = db.read_one(
+        "MATCH (u:User {user_id: $uid}) RETURN u.must_change_password AS flag",
+        {"uid": principal.user_id},
+    )
     return MeResponse(
         user={"user_id": principal.user_id, "email": principal.email, "name": principal.name},
         memberships=principal.memberships,
@@ -101,6 +293,7 @@ def me(principal: Principal = Depends(get_principal)) -> MeResponse:
             "org_name": principal.org_name,
             "role": principal.role,
         },
+        must_change_password=bool((change_row or {}).get("flag")),
     )
 
 
@@ -204,6 +397,8 @@ def refresh(
         repo.get("default_branch"),
         pinned,
         True,
+        print,
+        ingest_token(principal.org_id),
     )
     db.write(
         "MATCH (r:Repository {repo_id: $repo, org_id: $org}) SET r.sync_status = 'queued'",
@@ -568,6 +763,8 @@ def agent_auto(run_id: str, principal: Principal = Depends(get_principal)) -> di
 
 @router.post("/agent/runs/{run_id}/interrupt")
 def agent_interrupt(run_id: str, principal: Principal = Depends(get_principal)) -> dict[str, Any]:
+    if principal.role == "reader":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Readers cannot change agent state")
     row = db.read_one(
         "MATCH (r:AgentRun {run_id: $run, org_id: $org}) RETURN r.repo_id AS repo_id",
         {"run": run_id, "org": principal.org_id},
@@ -581,6 +778,8 @@ def agent_interrupt(run_id: str, principal: Principal = Depends(get_principal)) 
 
 @router.post("/agent/runs/{run_id}/resume")
 def agent_resume(run_id: str, principal: Principal = Depends(get_principal)) -> dict[str, Any]:
+    if principal.role == "reader":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Readers cannot change agent state")
     row = db.read_one(
         "MATCH (r:AgentRun {run_id: $run, org_id: $org}) RETURN r.repo_id AS repo_id",
         {"run": run_id, "org": principal.org_id},

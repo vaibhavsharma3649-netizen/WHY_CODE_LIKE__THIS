@@ -1,9 +1,15 @@
 import type {
+  AdminRepo,
+  AdminUser,
   AgentTask,
   AskResult,
+  AuthConfig,
+  AuditEvent,
   AskTurn,
   Citation,
   Finding,
+  GithubRepo,
+  GithubStatus,
   GraphResponse,
   Handover,
   Membership,
@@ -20,15 +26,21 @@ export const API_BASE =
   (import.meta.env.VITE_API_URL as string | undefined) ?? "http://127.0.0.1:8000/api";
 
 const TOKEN_KEY = "whyc.token";
+const REFRESH_KEY = "whyc.refresh";
 const ORG_KEY = "whyc.org";
 const REPO_KEY = "whyc.repo";
 
 export const session = {
   token: (): string | null => localStorage.getItem(TOKEN_KEY),
+  refresh: (): string | null => localStorage.getItem(REFRESH_KEY),
   org: (): string | null => localStorage.getItem(ORG_KEY),
   repo: (): string | null => localStorage.getItem(REPO_KEY),
   setToken(token: string) {
     localStorage.setItem(TOKEN_KEY, token);
+  },
+  setTokens(token: string, refresh: string) {
+    localStorage.setItem(TOKEN_KEY, token);
+    if (refresh) localStorage.setItem(REFRESH_KEY, refresh);
   },
   setOrg(org: string) {
     localStorage.setItem(ORG_KEY, org);
@@ -38,6 +50,7 @@ export const session = {
   },
   clear() {
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(REFRESH_KEY);
     localStorage.removeItem(ORG_KEY);
     localStorage.removeItem(REPO_KEY);
   },
@@ -62,11 +75,44 @@ function headers(extra?: Record<string, string>): Record<string, string> {
   };
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function doRefresh(): Promise<boolean> {
+  const refresh = session.refresh();
+  if (!refresh) return false;
+  try {
+    const response = await fetch(`${API_BASE}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refresh }),
+    });
+    if (!response.ok) return false;
+    const payload = (await response.json()) as TokenResponse;
+    session.setTokens(payload.token, payload.refresh_token);
+    if (payload.active_org?.org_id) session.setOrg(payload.active_org.org_id);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function refreshTokens(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = doRefresh().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
+async function request<T>(path: string, init?: RequestInit, allowRefresh = true): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: headers(init?.headers as Record<string, string> | undefined),
   });
+  if (response.status === 401 && allowRefresh && !path.startsWith("/auth/")) {
+    if (await refreshTokens()) return request<T>(path, init, false);
+  }
   if (!response.ok) {
     let detail = response.statusText;
     try {
@@ -80,11 +126,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-export interface LoginResponse {
+export interface TokenResponse {
   token: string;
+  refresh_token: string;
   user: User;
   memberships: Membership[];
   active_org: Membership;
+  must_change_password: boolean;
+}
+
+export type LoginResponse = TokenResponse;
+
+function storeSession(data: TokenResponse): void {
+  session.setTokens(data.token, data.refresh_token);
+  session.setOrg(data.active_org.org_id);
 }
 
 export async function login(email: string, password: string): Promise<LoginResponse> {
@@ -92,13 +147,48 @@ export async function login(email: string, password: string): Promise<LoginRespo
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
-  session.setToken(data.token);
-  session.setOrg(data.active_org.org_id);
+  storeSession(data);
   return data;
 }
 
-export async function me(): Promise<{ user: User; memberships: Membership[]; active_org: Membership }> {
+export async function me(): Promise<{
+  user: User;
+  memberships: Membership[];
+  active_org: Membership;
+  must_change_password: boolean;
+}> {
   return request("/me");
+}
+
+export async function authConfig(): Promise<AuthConfig> {
+  return request("/auth/config");
+}
+
+export async function githubExchange(code: string): Promise<TokenResponse> {
+  const data = await request<TokenResponse>("/auth/github/exchange", {
+    method: "POST",
+    body: JSON.stringify({ code }),
+  });
+  storeSession(data);
+  return data;
+}
+
+export async function logout(allDevices = false): Promise<void> {
+  try {
+    await request("/auth/logout", {
+      method: "POST",
+      body: JSON.stringify({ refresh_token: session.refresh(), all_devices: allDevices }),
+    });
+  } finally {
+    session.clear();
+  }
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  await request("/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
 }
 
 export async function listRepos(): Promise<{
@@ -274,6 +364,68 @@ export async function runStep(runId: string, tool: string, args: Record<string, 
     method: "POST",
     body: JSON.stringify({ tool, args }),
   });
+}
+
+export async function orgAudit(limit = 60): Promise<{ events: AuditEvent[] }> {
+  return request(`/org/audit?limit=${limit}`);
+}
+
+export async function adminUsers(): Promise<{ users: AdminUser[] }> {
+  return request("/admin/users");
+}
+
+export async function adminCreateUser(input: {
+  email: string;
+  name?: string;
+  role: string;
+  password?: string;
+}): Promise<{ user_id: string; email: string; temporary_password: string | null }> {
+  return request("/admin/users", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function adminUpdateUser(
+  userId: string,
+  input: { role?: string; status?: "active" | "disabled" },
+): Promise<void> {
+  await request(`/admin/users/${encodeURIComponent(userId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function adminResetPassword(userId: string): Promise<{ temporary_password: string }> {
+  return request(`/admin/users/${encodeURIComponent(userId)}/reset-password`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export async function adminRemoveUser(userId: string): Promise<void> {
+  await request(`/admin/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
+}
+
+export async function adminRepos(): Promise<{ repos: AdminRepo[] }> {
+  return request("/admin/repos");
+}
+
+export async function adminAddRepo(input: {
+  full_name?: string;
+  branch?: string;
+  pinned_prs?: number[];
+}): Promise<{ status: string; repo_id: string; full_name: string }> {
+  return request("/admin/repos", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function adminRemoveRepo(repoId: string): Promise<void> {
+  await request(`/admin/repos/${encodeURIComponent(repoId)}`, { method: "DELETE" });
+}
+
+export async function adminGithubStatus(): Promise<GithubStatus> {
+  return request("/admin/github");
+}
+
+export async function adminGithubRepos(): Promise<{ repos: GithubRepo[] }> {
+  return request("/admin/github/repos");
 }
 
 export function formatDate(value?: string | null): string {
