@@ -88,3 +88,13 @@ def test_login_content_contained_in_landmarks():
     assert 'aria-label=' in login_tsx, "Login aside landmark must have an accessible label"
 
 
+def test_no_high_entropy_token_in_client_source():
+    api_ts = Path("frontend/src/api.ts").read_text(encoding="utf-8")
+
+    # High-entropy token fingerprint whyc-dem... (len 36) must not exist in client source
+    assert "whyc-demo-token-staff-architect-2026" not in api_ts, (
+        "Client-side source must not assign high-entropy mock tokens to token fields"
+    )
+
+
+

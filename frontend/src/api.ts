@@ -129,8 +129,8 @@ function mockFallback<T>(path: string): T {
   if (path === "/auth/config") return DEMO_CONFIG as unknown as T;
   if (path === "/auth/login") {
     return {
-      token: "whyc-demo-token-staff-architect-2026",
-      refresh_token: "whyc-demo-refresh-staff",
+      token: "demo-offline-access",
+      refresh_token: "demo-offline-refresh",
       user: DEMO_USER_STAFF,
       memberships: [DEMO_MEMBERSHIP_STAFF],
       active_org: DEMO_MEMBERSHIP_STAFF,
