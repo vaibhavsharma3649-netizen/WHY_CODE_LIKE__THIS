@@ -97,4 +97,14 @@ def test_no_high_entropy_token_in_client_source():
     )
 
 
+def test_meta_description_present():
+    index_html = Path("frontend/index.html").read_text(encoding="utf-8")
+
+    # SEO requirement: document must contain <meta name="description">
+    assert '<meta name="description"' in index_html or '<meta\n      name="description"' in index_html, (
+        "index.html must include a meta description tag"
+    )
+
+
+
 
