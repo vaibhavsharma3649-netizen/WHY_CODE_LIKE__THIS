@@ -5,8 +5,8 @@
   --surface-2: #faf9f3;
   --ink: #16181a;
   --ink-soft: #2c2f31;
-  --muted: #6b6f76;
-  --faint: #94978f;
+  --muted: #52555a;
+  --faint: #595d62;
   --line: #e3e0d5;
   --line-strong: #d2cec0;
   --accent: #1c5c4b;
@@ -3372,7 +3372,7 @@ textarea {
   font-size: 9.5px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: #7f9a8d;
+  color: #8ea89c;
   position: relative;
   z-index: 1;
 }
