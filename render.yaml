@@ -1,0 +1,43 @@
+services:
+  - type: web
+    name: whycode-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: WHYCODE_ENV
+        value: prod
+      - key: WHYCODE_EMBEDDING_MODE
+        value: hash
+      - key: NEO4J_URI
+        sync: false
+      - key: NEO4J_USER
+        sync: false
+      - key: NEO4J_PASSWORD
+        sync: false
+      - key: NEO4J_DATABASE
+        value: neo4j
+      - key: WHYCODE_JWT_SECRET
+        generateValue: true
+      - key: WHYCODE_TOKEN_TTL_MINUTES
+        value: "120"
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: WHYCODE_CORS_ORIGINS
+        sync: false
+      - key: WHYCODE_CORS_ORIGIN_REGEX
+        value: https://.*\.vercel\.app
+      - key: WHYCODE_MAX_FILES
+        value: "140"
+      - key: WHYCODE_MAX_COMMITS
+        value: "25"
+      - key: WHYCODE_MAX_PRS
+        value: "8"
+      - key: WHYCODE_MAX_ISSUES
+        value: "8"

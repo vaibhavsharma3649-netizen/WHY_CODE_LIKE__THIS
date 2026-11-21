@@ -60,6 +60,13 @@ export interface AskTurn {
   line_end?: number | null;
 }
 
+export interface GroundingReport {
+  total_claims: number;
+  supported_claims: number;
+  unsupported_claims: number;
+  grounding_verdict: "VERIFIED" | "ABSTAINED" | "PARTIAL" | string;
+}
+
 export interface AskResult {
   answer: string;
   citations: Citation[];
@@ -67,10 +74,16 @@ export interface AskResult {
   mode: string;
   abstained: boolean;
   confidence: string;
-  timings: Record<string, number>;
+  timings: {
+    retrieve?: number;
+    total?: number;
+    vector_disabled?: boolean;
+    [key: string]: number | boolean | undefined;
+  };
   audit_id?: string | null;
   indexed_sha?: string | null;
   engine?: string;
+  grounding?: GroundingReport | null;
 }
 
 export interface HandoverSource {

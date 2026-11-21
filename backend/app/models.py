@@ -65,6 +65,13 @@ class Citation(BaseModel):
     language: str | None = None
 
 
+class GroundingReport(BaseModel):
+    total_claims: int
+    supported_claims: int
+    unsupported_claims: int
+    grounding_verdict: str
+
+
 class AskResponse(BaseModel):
     answer: str
     citations: list[Citation]
@@ -72,10 +79,11 @@ class AskResponse(BaseModel):
     mode: str
     abstained: bool
     confidence: str
-    timings: dict[str, float]
+    timings: dict[str, Any]
     audit_id: str | None = None
     indexed_sha: str | None = None
     engine: str | None = None
+    grounding: GroundingReport | None = None
 
 
 class HandoverSource(BaseModel):

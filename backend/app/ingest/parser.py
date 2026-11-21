@@ -9,9 +9,156 @@ from typing import Any
 MAX_FILE_BYTES = 220_000
 CHUNK_CHARS = 1200
 CHUNK_OVERLAP = 180
+MAX_FUNCTION_CHARS = 1500
 
 
 def stable_id(prefix: str, *parts: str) -> str:
+    digest = hashlib.blake2b("\u241f".join(parts).encode(), digest_size=10).hexdigest()
+    return f"{prefix}_{digest}"
+
+
+def _chunk_by_ast(
+    file_id: str,
+    rel_path: str,
+    text: str,
+    org_id: str,
+    repo_id: str,
+    commit_sha: str,
+    owner: str,
+    name: str,
+) -> list[Chunk]:
+    """Create chunks aligned to Python AST boundaries (module, class, function)."""
+    tree = ast.parse(text)
+    chunks: list[Chunk] = []
+    total_lines = text.count("\n") + 1
+
+    def _add(start: int, end: int, content: str) -> None:
+        if not content or not content.strip():
+            return
+        chunks.append(
+            Chunk(
+                chunk_id=chunk_key(repo_id, rel_path, start),
+                file_id=file_id,
+                repo_id=repo_id,
+                org_id=org_id,
+                path=rel_path,
+                content_excerpt=content.strip(),
+                line_start=start,
+                line_end=end,
+                commit_sha=commit_sha,
+                source_url=source_url(owner, name, commit_sha, rel_path, start, end),
+                language="python",
+            )
+        )
+
+    # Module-level chunk: one chunk for the whole file when it is small enough.
+    if len(text) <= CHUNK_CHARS:
+        _add(1, total_lines, text)
+
+    # One chunk per class, function, and method (nested definitions included).
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        start = node.lineno
+        end = getattr(node, "end_lineno", start) or start
+        segment = ast.get_source_segment(text, node)
+        if not segment:
+            continue
+        if len(segment) <= MAX_FUNCTION_CHARS:
+            _add(start, end, segment)
+            continue
+        # Bounded sliding window for oversized definitions.
+        offset = 0
+        while offset < len(segment):
+            piece = segment[offset : offset + CHUNK_CHARS]
+            piece_start = start + segment[:offset].count("\n")
+            piece_end = piece_start + piece.count("\n")
+            _add(piece_start, piece_end, piece)
+            if offset + CHUNK_CHARS >= len(segment):
+                break
+            offset = max(offset + CHUNK_CHARS - CHUNK_OVERLAP, offset + 1)
+
+    if not chunks:
+        return _chunk_fixed(file_id, rel_path, text, "python", org_id, repo_id, commit_sha, owner, name)
+    return chunks
+
+
+def _chunk_fixed(
+    file_id: str,
+    rel_path: str,
+    text: str,
+    language: str,
+    org_id: str,
+    repo_id: str,
+    commit_sha: str,
+    owner: str,
+    name: str,
+) -> list[Chunk]:
+    """Original fixed‑size chunking fallback."""
+    lines = text.splitlines()
+    chunks: list[Chunk] = []
+    start = 0
+    total = len(text)
+    while start < total:
+        end = min(total, start + CHUNK_CHARS)
+        excerpt = text[start:end]
+        prefix_lines = text[:start].count("\n")
+        line_start = prefix_lines + 1
+        line_end = line_start + excerpt.count("\n")
+        if excerpt.strip():
+            chunks.append(
+                Chunk(
+                    chunk_id=chunk_key(repo_id, rel_path, line_start),
+                    file_id=file_id,
+                    repo_id=repo_id,
+                    org_id=org_id,
+                    path=rel_path,
+                    content_excerpt=excerpt.strip(),
+                    line_start=line_start,
+                    line_end=line_end,
+                    commit_sha=commit_sha,
+                    source_url=source_url(owner, name, commit_sha, rel_path, line_start, line_end),
+                    language=language,
+                )
+            )
+        if end >= total:
+            break
+        start = max(end - CHUNK_OVERLAP, start + 1)
+    return chunks
+
+
+def chunk_file(
+    rel_path: str,
+    text: str,
+    language: str,
+    org_id: str,
+    repo_id: str,
+    commit_sha: str,
+    owner: str,
+    name: str,
+) -> list[Chunk]:
+    if language == "python":
+        return _chunk_by_ast(
+            file_key(repo_id, rel_path),
+            rel_path,
+            text,
+            org_id,
+            repo_id,
+            commit_sha,
+            owner,
+            name,
+        )
+    return _chunk_fixed(
+        file_key(repo_id, rel_path),
+        rel_path,
+        text,
+        language,
+        org_id,
+        repo_id,
+        commit_sha,
+        owner,
+        name,
+    )
     digest = hashlib.blake2b("\u241f".join(parts).encode(), digest_size=10).hexdigest()
     return f"{prefix}_{digest}"
 
@@ -225,49 +372,6 @@ def parse_python(
     for item in entities:
         item["imports"] = sorted(set(imports))[:12]
     return ParsedFile(rel_path, text, "python", entities, sorted(set(imports)))
-
-
-def chunk_file(
-    rel_path: str,
-    text: str,
-    language: str,
-    org_id: str,
-    repo_id: str,
-    commit_sha: str,
-    owner: str,
-    name: str,
-) -> list[Chunk]:
-    file_id = file_key(repo_id, rel_path)
-    lines = text.splitlines()
-    chunks: list[Chunk] = []
-    start = 0
-    total = len(text)
-    while start < total:
-        end = min(total, start + CHUNK_CHARS)
-        excerpt = text[start:end]
-        prefix_lines = text[:start].count("\n")
-        line_start = prefix_lines + 1
-        line_end = line_start + excerpt.count("\n")
-        if excerpt.strip():
-            chunks.append(
-                Chunk(
-                    chunk_id=chunk_key(repo_id, rel_path, line_start),
-                    file_id=file_id,
-                    repo_id=repo_id,
-                    org_id=org_id,
-                    path=rel_path,
-                    content_excerpt=excerpt.strip(),
-                    line_start=line_start,
-                    line_end=line_end,
-                    commit_sha=commit_sha,
-                    source_url=source_url(owner, name, commit_sha, rel_path, line_start, line_end),
-                    language=language,
-                )
-            )
-        if end >= total:
-            break
-        start = max(end - CHUNK_OVERLAP, start + 1)
-    return chunks
 
 
 def normalize_rel(path: Path, root: Path) -> str:

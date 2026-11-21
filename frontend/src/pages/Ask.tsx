@@ -47,6 +47,13 @@ function engineTone(engine?: string): string {
   return "neutral";
 }
 
+function groundingTone(verdict?: string): string {
+  if (verdict === "VERIFIED") return "ok";
+  if (verdict === "PARTIAL") return "warn";
+  if (verdict === "ABSTAINED") return "danger";
+  return "neutral";
+}
+
 function suggestionsForRole(role: Role | null): Array<{ text: string; note: string }> {
   if (role === "security_reviewer") {
     return [
@@ -219,6 +226,19 @@ export function Ask() {
   evidenceRef.current = evidence;
 
   useEffect(() => {
+    setTurns([]);
+    setAsked("");
+    setAnswer("");
+    setEvidence([]);
+    setResult(null);
+    setSelectedCitation(null);
+    setError(null);
+    setPhase("idle");
+    setQuestion("");
+    abortRef.current?.abort();
+  }, [repoId]);
+
+  useEffect(() => {
     const node = threadRef.current;
     if (node) node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
   }, [answer, phase, turns.length]);
@@ -272,7 +292,7 @@ export function Ask() {
     const focus = forcedFocus ?? (needsFocus ? selectedCitation : null);
 
     setAsked(clean);
-    setQuestion(clean);
+    setQuestion("");
     setAnswer("");
     setEvidence([]);
     evidenceRef.current = [];
@@ -392,6 +412,9 @@ export function Ask() {
                     <Pill tone="mode">{MODE_LABEL[turn.mode] ?? turn.mode}</Pill>
                     <span>{turn.evidence.length} sources</span>
                     {turn.result?.engine ? <span>{engineLabel(turn.result.engine)}</span> : null}
+                    {turn.result?.grounding ? (
+                      <span>{turn.result.grounding.grounding_verdict.toLowerCase()}</span>
+                    ) : null}
                     {turn.evidence[0] ? (
                       <button type="button" className="link-btn" onClick={() => setSelectedCitation(turn.evidence[0])}>
                         View code
@@ -418,6 +441,14 @@ export function Ask() {
                       {result?.abstained ? <Pill tone="warn">abstained</Pill> : null}
                       {result?.engine ? (
                         <Pill tone={engineTone(result.engine)}>{engineLabel(result.engine)}</Pill>
+                      ) : null}
+                      {result?.grounding ? (
+                        <Pill
+                          tone={groundingTone(result.grounding.grounding_verdict)}
+                          title={`${result.grounding.supported_claims} of ${result.grounding.total_claims} claims grounded`}
+                        >
+                          {result.grounding.grounding_verdict.toLowerCase()}
+                        </Pill>
                       ) : null}
                       {confidence && phase === "done" ? (
                         <span className="confidence">{confidence} confidence</span>
@@ -464,6 +495,14 @@ export function Ask() {
                           <span>
                             evidence <strong>{evidence.length}</strong>
                           </span>
+                          {result?.grounding ? (
+                            <span>
+                              grounding{" "}
+                              <strong>
+                                {result.grounding.supported_claims}/{result.grounding.total_claims}
+                              </strong>
+                            </span>
+                          ) : null}
                           {result?.audit_id ? (
                             <span className="audit">
                               audit <code>{result.audit_id}</code>

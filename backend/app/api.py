@@ -19,7 +19,7 @@ from .auth import (
     verify_password,
 )
 from .ingest.pipeline import ingest
-from .llm import compose_deterministic, synth_stream
+from .llm import compose_deterministic, synth_stream, _compute_grounding_report
 from .models import (
     AskRequest,
     AskResponse,
@@ -278,6 +278,7 @@ def _run_query(
     answer, citation_ids, abstained, confidence = compose_deterministic(
         retrieval_question, retrieval["mode"], evidence, repo
     )
+    grounding = _compute_grounding_report(answer, citation_ids, evidence)
     engine = "deterministic"
     final: dict[str, Any] | None = None
     text = ""
@@ -332,7 +333,7 @@ def _run_query(
         "confidence": confidence if engine == "deterministic" else final.get("confidence", confidence),
         "timings": timings,
         "audit_id": audit_id,
-        "indexed_sha": repo.get("indexed_sha"),
+        "grounding": grounding,
         "engine": engine,
     }
 
@@ -399,6 +400,9 @@ def ask_stream(body: AskRequest, principal: Principal = Depends(get_principal)) 
         if not citations:
             abstained = True
         engine = final.get("engine", "deterministic")
+        grounding = _compute_grounding_report(
+            final.get("answer") or answer, final.get("citation_ids", []), evidence
+        )
         timings = {
             **retrieval.get("timings", {}),
             "total": round((time.perf_counter() - started) * 1000, 1),
@@ -426,6 +430,7 @@ def ask_stream(body: AskRequest, principal: Principal = Depends(get_principal)) 
                 "timings": timings,
                 "audit_id": audit_id,
                 "indexed_sha": repo.get("indexed_sha"),
+                "grounding": grounding,
                 "engine": engine,
             },
         )

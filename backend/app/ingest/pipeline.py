@@ -17,6 +17,33 @@ from ..embeddings import embed_texts
 from . import parser as p
 from .github import GitHub
 
+def _clear_repo_nodes(repo_id: str, org_id: str) -> None:
+    db.write(
+        """
+        MATCH (f:File {repo_id: $repo, org_id: $org})
+        DETACH DELETE f
+        MATCH (e:CodeEntity {repo_id: $repo, org_id: $org})
+        DETACH DELETE e
+        MATCH (c:CodeChunk {repo_id: $repo, org_id: $org})
+        DETACH DELETE c
+        MATCH (s:SecurityFinding {repo_id: $repo, org_id: $org})
+        DETACH DELETE s
+        """,
+        {"repo": repo_id, "org": org_id},
+    )
+
+
+def _check_embedding_backend(repo_id: str, org_id: str, new_backend: str) -> bool:
+    """Return True if the new backend matches the repo's stored backend."""
+    prev = db.read(
+        "MATCH (r:Repository {repo_id: $repo, org_id: $org}) RETURN r.embedding_backend AS be",
+        {"repo": repo_id},
+    )
+    if not prev or not prev[0].get("be"):
+        return True  # first time, accept
+    return prev[0]["be"] == new_backend
+
+
 MARKERS = (
     "because",
     "so that",
@@ -562,6 +589,7 @@ def ingest(
         head = gh.latest_sha(owner, name, branch)
         sha = head["sha"]
         _merge_repo(org_id, repo_id, owner, name, meta, sha, branch)
+        _clear_repo_nodes(repo_id, org_id)
         log(f"repository {owner}/{name} at {sha[:10]} ({branch})")
 
         dest = settings.ingest_dir / repo_id / sha[:12]
@@ -644,6 +672,8 @@ def ingest(
         backend = _embed_chunks(chunks_with_vectors)
         log(f"embedded {len(chunks_with_vectors)} chunks with {backend}")
 
+        vector_disabled = not _check_embedding_backend(repo_id, org_id, backend)
+
         commits = _ingest_commits(gh, owner, name, sha, repo_id, org_id)
         pulls = _ingest_pulls(gh, owner, name, repo_id, org_id, pinned)
         issues = _ingest_issues(gh, owner, name, repo_id, org_id)
@@ -663,7 +693,8 @@ def ingest(
                 r.findings_indexed = $findings,
                 r.skipped_json = $skipped,
                 r.error_text = null,
-                r.embedding_backend = $backend
+                r.embedding_backend = $backend,
+                r.vector_disabled = $vector_disabled
             """,
             {
                 "repo": repo_id,
@@ -695,6 +726,7 @@ def ingest(
             "calls_edges": len(calls),
             "imports_edges": len(imports),
             "embedding_backend": backend,
+            "vector_disabled": vector_disabled,
             "skipped": skipped[:40],
             "duration_seconds": round(time.perf_counter() - started, 1),
         }

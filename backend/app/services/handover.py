@@ -85,6 +85,8 @@ def _extract_setup_lines(chunks: list[dict[str, Any]]) -> list[tuple[str, dict[s
 
 def build(org_id: str, repo_id: str) -> dict[str, Any]:
     overview = repo_overview(org_id, repo_id)
+    if not overview or "repo" not in overview:
+        raise ValueError(f"Repository {repo_id} not found in org {org_id}")
     repo = overview["repo"]
     org = overview["org"]
     counts = overview.get("counts") or {}

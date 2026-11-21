@@ -252,7 +252,7 @@ def step(org_id: str, repo_id: str, run_id: str, tool: str, args: dict[str, Any]
         raise ValueError(f"run is {run['run'].get('status')}, not running")
     results = _tool_results(org_id, repo_id, tool, args)
     _persist_step(org_id, repo_id, run_id, tool, args, results)
-    return {"results": results, **get_run(org_id, repo_id, run_id)}  # type: ignore[dict-item]
+    return {"results": results, **(get_run(org_id, repo_id, run_id) or {})}
 
 
 def interrupt(org_id: str, repo_id: str, run_id: str) -> dict[str, Any]:
@@ -316,7 +316,7 @@ def resume(org_id: str, repo_id: str, run_id: str) -> dict[str, Any]:
             ),
         },
     )
-    return {**get_run(org_id, repo_id, run_id), "validation": validation}  # type: ignore[dict-item]
+    return {**(get_run(org_id, repo_id, run_id) or {}), "validation": validation}
 
 
 class AgentState(TypedDict, total=False):
@@ -406,5 +406,5 @@ def auto_step(org_id: str, repo_id: str, run_id: str) -> dict[str, Any]:
     return {
         "tool": state.get("tool"),
         "results": state.get("results") or [],
-        **get_run(org_id, repo_id, run_id),  # type: ignore[dict-item]
+        **(get_run(org_id, repo_id, run_id) or {}),
     }

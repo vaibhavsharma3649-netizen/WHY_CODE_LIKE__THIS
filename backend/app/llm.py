@@ -28,6 +28,8 @@ SYSTEM = (
 
 CITATION_RE = re.compile(r"\[(ev\d+)\]")
 
+SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+
 
 def evidence_block(evidence: list[dict[str, Any]], limit: int = 7000) -> str:
     lines: list[str] = []
@@ -46,6 +48,70 @@ def evidence_block(evidence: list[dict[str, Any]], limit: int = 7000) -> str:
         lines.append(block)
         used += len(block)
     return "\n\n".join(lines)
+
+
+def _compute_grounding_report(
+    answer: str,
+    citation_ids: list[str],
+    evidence: list[dict[str, Any]],
+) -> dict[str, Any]:
+    sentences = [
+        s.strip()
+        for s in SENTENCE_SPLIT_RE.split(answer.strip())
+        if s.strip()
+    ]
+    total_claims = len(sentences)
+    if total_claims == 0:
+        return {
+            "total_claims": 0,
+            "supported_claims": 0,
+            "unsupported_claims": 0,
+            "grounding_verdict": "ABSTAINED",
+        }
+    # Only cited evidence can support a claim.
+    cited = set(citation_ids)
+    snippets: list[str] = []
+    for ev in evidence:
+        if cited and ev.get("id") not in cited:
+            continue
+        snippet = (ev.get("snippet") or "").strip().lower()
+        if snippet:
+            snippets.append(snippet)
+
+    supported = 0
+    for sentence in sentences:
+        cleaned = CITATION_RE.sub("", sentence)
+        cleaned = re.sub(r"[.!?]+$", "", cleaned).strip().lower()
+        if not cleaned:
+            continue
+        if any(cleaned in snippet for snippet in snippets):
+            supported += 1
+            continue
+        words = set(re.findall(r"[a-z0-9_]+", cleaned))
+        if not words:
+            continue
+        best = max(
+            (
+                len(words & set(re.findall(r"[a-z0-9_]+", snippet))) / len(words)
+                for snippet in snippets
+            ),
+            default=0.0,
+        )
+        if best >= 0.6:
+            supported += 1
+
+    unsupported = total_claims - supported
+    verdict = (
+        "VERIFIED"
+        if supported > 0 and unsupported == 0
+        else ("ABSTAINED" if supported == 0 else "PARTIAL")
+    )
+    return {
+        "total_claims": total_claims,
+        "supported_claims": supported,
+        "unsupported_claims": unsupported,
+        "grounding_verdict": verdict,
+    }
 
 
 def _history_block(history: list[Any] | None) -> str:

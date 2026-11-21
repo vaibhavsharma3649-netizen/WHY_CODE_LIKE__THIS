@@ -31,7 +31,7 @@ class Settings:
     neo4j_user: str = _env("NEO4J_USER", "neo4j")
     neo4j_password: str = _env("NEO4J_PASSWORD", "neo4j")
     neo4j_database: str = _env("NEO4J_DATABASE", "neo4j")
-    jwt_secret: str = _env("WHYCODE_JWT_SECRET", "dev-only-change-me")
+    jwt_secret: str = _env("WHYCODE_JWT_SECRET", "dev-only-change-me-32-byte-default-secret!")
     token_ttl_minutes: int = _int("WHYCODE_TOKEN_TTL_MINUTES", 720)
     github_token: str = _env("GITHUB_TOKEN")
     github_api: str = _env("GITHUB_API", "https://api.github.com")
@@ -63,6 +63,23 @@ class Settings:
         if self.llm_mode == "groq":
             return bool(self.groq_key)
         return bool(self.groq_key)
+
+    @property
+    def is_prod(self) -> bool:
+        return self.env.lower() in {"prod", "production"}
+
+    def validate_production(self) -> None:
+        if not self.is_prod:
+            return
+        problems: list[str] = []
+        if self.jwt_secret.startswith("dev-only") or len(self.jwt_secret) < 32:
+            problems.append("WHYCODE_JWT_SECRET must be a strong random value of at least 32 bytes")
+        if self.neo4j_password.lower() in {"", "neo4j", "change-me", "password", "secret"}:
+            problems.append("NEO4J_PASSWORD must not use a default value")
+        if "*" in self.cors_origins:
+            problems.append("WHYCODE_CORS_ORIGINS must not contain '*' when credentials are enabled")
+        if problems:
+            raise RuntimeError("Invalid production configuration: " + "; ".join(problems))
 
 
 settings = Settings()

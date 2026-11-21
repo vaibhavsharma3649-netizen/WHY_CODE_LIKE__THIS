@@ -91,7 +91,13 @@ def _entity_rows(org: str, repo: str, question: str) -> tuple[list[dict[str, Any
     return exact, ft
 
 
-def _chunk_candidates(org: str, repo: str, question: str) -> dict[str, dict[str, Any]]:
+def _chunk_candidates(
+    org: str,
+    repo: str,
+    question: str,
+    query_vec: list[float] | None = None,
+    vector_disabled: bool = False,
+) -> dict[str, dict[str, Any]]:
     collected: dict[str, dict[str, Any]] = {}
     lexical: list[tuple[str, float]] = []
     q = _fulltext_query(question)
@@ -115,19 +121,23 @@ def _chunk_candidates(org: str, repo: str, question: str) -> dict[str, dict[str,
             collected[c["chunk_id"]] = c
             lexical.append((c["chunk_id"], row["score"]))
     vector: list[tuple[str, float]] = []
-    try:
-        vec, _ = embed_query(question)
-        rows = db.read(
-            """
-            CALL db.index.vector.queryNodes('chunk_vec', $k, $vec) YIELD node, score
-            WHERE node.org_id = $org AND node.repo_id = $repo
-            RETURN node {.*} AS c, score
-            LIMIT 16
-            """,
-            {"org": org, "repo": repo, "vec": vec, "k": 40},
-        )
-    except Exception:
-        rows = []
+    rows: list[dict[str, Any]] = []
+    if not vector_disabled:
+        try:
+            vec = query_vec
+            if vec is None:
+                vec, _ = embed_query(question)
+            rows = db.read(
+                """
+                CALL db.index.vector.queryNodes('chunk_vec', $k, $vec) YIELD node, score
+                WHERE node.org_id = $org AND node.repo_id = $repo
+                RETURN node {.*} AS c, score
+                LIMIT 16
+                """,
+                {"org": org, "repo": repo, "vec": vec, "k": 40},
+            )
+        except Exception:
+            rows = []
     for row in rows:
         c = row["c"]
         c["_vector"] = True
@@ -358,7 +368,27 @@ def retrieve(
         entities.values(), key=lambda e: entity_scores.get(e["entity_id"], 0.0), reverse=True
     )[:6]
 
-    chunks = _chunk_candidates(org_id, repo_id, question)
+    vector_disabled = False
+    query_vec: list[float] | None = None
+    repo_row = db.read_one(
+        """
+        MATCH (r:Repository {org_id: $org, repo_id: $repo})
+        RETURN r.embedding_backend AS be, r.vector_disabled AS vd
+        """,
+        {"org": org_id, "repo": repo_id},
+    )
+    if repo_row:
+        stored_backend = repo_row.get("be")
+        vector_disabled = bool(repo_row.get("vd"))
+        if not vector_disabled and stored_backend:
+            try:
+                query_vec, query_backend = embed_query(question)
+                vector_disabled = query_backend != stored_backend
+            except Exception:
+                vector_disabled = True
+    chunks = _chunk_candidates(
+        org_id, repo_id, question, query_vec=query_vec, vector_disabled=vector_disabled
+    )
     top_chunks = list(chunks.values())[:6]
 
     evidence: list[dict[str, Any]] = []
@@ -481,7 +511,10 @@ def retrieve(
         "evidence": deduped,
         "entity_ids": entity_ids,
         "paths": strong_paths,
-        "timings": {"retrieve": round((time.perf_counter() - started) * 1000, 1)},
+        "timings": {
+            "retrieve": round((time.perf_counter() - started) * 1000, 1),
+            "vector_disabled": vector_disabled,
+        },
     }
 
 
