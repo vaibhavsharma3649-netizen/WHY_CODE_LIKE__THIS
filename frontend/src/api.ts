@@ -41,6 +41,7 @@ import {
   addCustomRepo,
   getDemoDecisions,
   getDemoFindings,
+  getDemoGraph,
   getDemoOverview,
   getDemoTimeline,
   localAiInference,
@@ -160,7 +161,7 @@ function mockFallback<T>(path: string): T {
   if (path.includes("/decisions")) return { decisions: getDemoDecisions(activeRepo) } as unknown as T;
   if (path.includes("/findings")) return { findings: getDemoFindings(activeRepo) } as unknown as T;
   if (path.includes("/handover")) return DEMO_HANDOVER as unknown as T;
-  if (path.includes("/graph")) return DEMO_GRAPH as unknown as T;
+  if (path.includes("/graph")) return getDemoGraph(activeRepo) as unknown as T;
   if (path.includes("/agent/tasks")) return { tasks: DEMO_TASKS } as unknown as T;
   if (path.includes("/org/audit")) return { events: DEMO_AUDIT } as unknown as T;
   if (path.includes("/admin/users")) return { users: DEMO_ADMIN_USERS } as unknown as T;
