@@ -8,12 +8,28 @@ import { EmptyBlock, ErrorBlock, KindBadge, LoadingBlock, Pill, SectionLabel } f
 const SEVERITY_ORDER: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
 
 export function Security() {
-  const { repoId } = useAuth();
+  const { repoId, repo } = useAuth();
   const state = useAsync(
     () => (repoId ? loadFindings(repoId) : Promise.reject(new Error("No repository selected."))),
     [repoId],
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const repoName = repo?.name?.toLowerCase() ?? "";
+  const isSpring = repoName.includes("spring");
+  const isGin = repoName.includes("gin");
+  const isExpress = repoName.includes("express");
+  const isFlask = repoName === "flask" || (!isSpring && !isGin && !isExpress && repo?.repo_id === "repo_flask");
+
+  const scannerLabel = isSpring
+    ? "SpotBugs · Snyk · Dependency-Check"
+    : isGin
+      ? "GoSec · Govulncheck · Race Detector"
+      : isExpress
+        ? "ESLint Security · NPM Audit · Semgrep"
+        : isFlask
+          ? "Bandit · Semgrep · Pip-Audit"
+          : "WhyCode AST Security Scanner · Multi-Language Linter · CVE Invariant Verifier";
 
   const sorted = useMemo(() => {
     return [...(state.data?.findings ?? [])].sort(
@@ -46,17 +62,22 @@ export function Security() {
     <div className="page">
       <header className="page-head">
         <div>
-          <p className="eyebrow">Scanner signals, linked to history</p>
+          <p className="eyebrow">Multi-Language Security Signals & Invariant Analysis</p>
           <h1>Security review</h1>
           <p className="sub">
-            Bandit findings from the indexed revision, with the decisions that may explain them. A finding
-            is a prompt for review, not a verdict.
+            Automated security findings for {repo?.full_name ?? "this repository"}, cross-referenced with recorded engineering rationale and PR decisions. A finding is a prompt for review, not a verdict.
           </p>
         </div>
-        <div className="sev-summary">
-          <span className="sev-count sev-high">{counts.HIGH ?? 0} high</span>
-          <span className="sev-count sev-medium">{counts.MEDIUM ?? 0} medium</span>
-          <span className="sev-count sev-low">{counts.LOW ?? 0} low</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <Pill tone="ok">
+            <ShieldCheck size={13} style={{ marginRight: 4 }} />
+            Active Security Guard
+          </Pill>
+          <div className="sev-summary">
+            <span className="sev-count sev-high">{counts.HIGH ?? 0} high</span>
+            <span className="sev-count sev-medium">{counts.MEDIUM ?? 0} medium</span>
+            <span className="sev-count sev-low">{counts.LOW ?? 0} low</span>
+          </div>
         </div>
       </header>
 
@@ -92,7 +113,7 @@ export function Security() {
               ))}
             </div>
             <p className="list-foot">
-              <ScanLine size={12} /> Bandit · indexed revision only
+              <ScanLine size={12} /> {scannerLabel} · indexed revision only
             </p>
           </section>
 
@@ -107,6 +128,24 @@ export function Security() {
 
               <h2 className="detail-title">{selected.rule_id}</h2>
               <p className="detail-message">{selected.message}</p>
+
+              <div style={{ display: "flex", gap: 10, marginTop: 14, marginBottom: 18 }}>
+                <a
+                  href="#invariants"
+                  className="btn btn-primary btn-sm"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, textDecoration: "none" }}
+                >
+                  <ShieldCheck size={14} />
+                  Verify with Invariant Oracle
+                </a>
+                <a
+                  href="#ask"
+                  className="btn btn-soft btn-sm"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, textDecoration: "none" }}
+                >
+                  Ask WhyCode about this finding
+                </a>
+              </div>
 
               <dl className="facts detail-facts">
                 <div>

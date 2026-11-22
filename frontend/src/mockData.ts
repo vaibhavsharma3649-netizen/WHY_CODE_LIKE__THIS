@@ -2122,10 +2122,14 @@ export function getDemoRepo(repoId = "repo_flask"): Repo {
 
 export function getDemoOverview(repoId = "repo_flask"): Overview {
   const repo = getDemoRepo(repoId);
+  const repoFindings = getDemoFindings(repoId);
   return {
     repo,
     org: DEMO_OVERVIEW.org,
-    counts: repo.counts ?? DEMO_OVERVIEW.counts,
+    counts: {
+      ...(repo.counts ?? DEMO_OVERVIEW.counts),
+      findings: repoFindings.length,
+    },
     recent_commits: DEMO_OVERVIEW.recent_commits,
     timeline: getDemoTimeline(repoId),
   };
@@ -2185,10 +2189,40 @@ export function getDemoTimeline(repoId = "repo_flask"): TimelineItem[] {
         url: "https://github.com/gin-gonic/gin/pull/1420",
       },
       {
+        kind: "finding",
+        at: "2024-01-21T11:00:00Z",
+        title: "GoSec G601 Memory Aliasing marked Documented/Accepted under Invariant #1420",
+        url: "https://github.com/gin-gonic/gin/security",
+      },
+      {
         kind: "commit",
         at: "2024-01-20T14:10:00Z",
         title: "Merge PR #810: Sub-microsecond routing via Radix Tree",
         url: "https://github.com/gin-gonic/gin/commit/3a91f8c2e4d0",
+      },
+    ];
+  }
+
+  const repo = getDemoRepo(repoId);
+  if (repoId !== "repo_flask" && repo.name.toLowerCase() !== "flask") {
+    return [
+      {
+        kind: "decision",
+        at: "2024-04-18T10:14:00Z",
+        title: `Enforce input contract boundary for ${repo.name} (PR #108)`,
+        url: `https://github.com/${repo.full_name}/pull/108`,
+      },
+      {
+        kind: "finding",
+        at: "2024-04-18T09:30:00Z",
+        title: `WhyCode AST Security Scanner: ${repo.name} boundary validation marked Documented/Accepted`,
+        url: `https://github.com/${repo.full_name}/security`,
+      },
+      {
+        kind: "commit",
+        at: "2024-04-15T16:20:00Z",
+        title: `Merge PR #108: Multi-language AST architecture verification`,
+        url: `https://github.com/${repo.full_name}/commit/${repo.indexed_sha?.slice(0, 8) ?? "7d2b8e4f"}`,
       },
     ];
   }
@@ -2209,16 +2243,529 @@ export function getDemoDecisions(repoId = "repo_flask"): Citation[] {
 }
 
 export function getDemoFindings(repoId = "repo_flask"): Finding[] {
-  if (repoId === "repo_spring") {
-    return DEMO_FINDINGS.filter((f) => f.finding_id.includes("spotbugs"));
+  const repo = DEMO_REPOS.find((r) => r.repo_id === repoId) ?? DEMO_REPO_FLASK;
+  const cleanId = repoId.toLowerCase();
+
+  if (cleanId === "repo_spring" || repo.name.toLowerCase().includes("spring")) {
+    return [
+      {
+        finding_id: "find_spring_cve_34035",
+        rule_id: "CVE-2023-34035",
+        severity: "HIGH",
+        confidence: "HIGH",
+        status: "DOCUMENTED_ACCEPTED",
+        scanner: "SpotBugs / Snyk",
+        path: "src/main/java/org/springframework/boot/autoconfigure/security/SecurityConfig.java",
+        line_start: 48,
+        line_end: 56,
+        message: "Actuator endpoint authorization bypass: Custom SecurityFilterChain lacks explicit @Order precedence over management endpoints.",
+        url: "https://nvd.nist.gov/vuln/detail/CVE-2023-34035",
+        label: "CVE-2023-34035",
+        related_decisions: [
+          {
+            decision_id: "dec-spring-order",
+            summary: "Enforce @Order(HIGHEST_PRECEDENCE + 50) on custom SecurityFilterChain",
+            rationale: "PR #34091 established that actuator filters must take precedence over default catch-all request matchers to prevent exposing /actuator/env.",
+            evidence_url: "https://github.com/spring-projects/spring-boot/pull/34091",
+            rationale_type: "security_isolation",
+          },
+        ],
+      },
+      {
+        finding_id: "find_spotbugs_ei2",
+        rule_id: "EI_EXPOSE_REP2",
+        severity: "MEDIUM",
+        confidence: "HIGH",
+        status: "DOCUMENTED_ACCEPTED",
+        scanner: "SpotBugs",
+        path: "src/main/java/org/springframework/boot/autoconfigure/security/SecurityConfig.java",
+        line_start: 52,
+        line_end: 56,
+        message: "May expose internal representation by storing reference to mutable HttpSecurity object.",
+        url: "https://spotbugs.readthedocs.io/en/latest/bugDescriptions.html#EI_EXPOSE_REP2",
+        label: "SpotBugs EI2",
+        related_decisions: [
+          {
+            decision_id: "dec-spring-2",
+            summary: "SecurityFilterChain bean requires direct HttpSecurity builder configuration",
+            rationale: "HttpSecurity builder is thread-confined during application context initialization and sealed before runtime requests.",
+            evidence_url: "https://github.com/spring-projects/spring-boot/pull/34091",
+            rationale_type: "framework_protection",
+          },
+        ],
+      },
+      {
+        finding_id: "find_spring_xxe",
+        rule_id: "SEC_XXE_SAX",
+        severity: "MEDIUM",
+        confidence: "HIGH",
+        status: "REVIEWED_SAFE",
+        scanner: "SpotBugs Security",
+        path: "src/main/java/org/springframework/boot/json/JsonParser.java",
+        line_start: 64,
+        line_end: 72,
+        message: "XML External Entity (XXE) parser factory requires feature disallow-doctype-decl.",
+        url: "https://cwe.mitre.org/data/definitions/611.html",
+        label: "SpotBugs XXE",
+        related_decisions: [
+          {
+            decision_id: "dec-spring-xxe",
+            summary: "Disallow DOCTYPE declaration by default on all XML factories",
+            rationale: "Prevents XXE attacks across XML request bodies while preserving standard JSON processing.",
+            evidence_url: "https://github.com/spring-projects/spring-boot/pull/18204",
+            rationale_type: "framework_protection",
+          },
+        ],
+      },
+      {
+        finding_id: "find_spring_csrf",
+        rule_id: "SPRING_CSRF_DISABLED",
+        severity: "LOW",
+        confidence: "HIGH",
+        status: "DOCUMENTED_ACCEPTED",
+        scanner: "Snyk Code",
+        path: "src/main/java/org/springframework/boot/web/servlet/FilterRegistrationBean.java",
+        line_start: 32,
+        line_end: 38,
+        message: "CSRF protection disabled for internal health probe servlet endpoint.",
+        url: "https://docs.spring.io/spring-security/reference/servlet/exploits/csrf.html",
+        label: "CSRF Probe Exemption",
+        related_decisions: [
+          {
+            decision_id: "dec-spring-csrf",
+            summary: "Health probe endpoint exempted from CSRF validation",
+            rationale: "Internal Kubernetes liveness probes do not carry CSRF tokens; restricted to loopback and internal pod network.",
+            evidence_url: "https://github.com/spring-projects/spring-boot/pull/29810",
+            rationale_type: "compatibility_exemption",
+          },
+        ],
+      },
+    ];
   }
-  if (repoId === "repo_express") {
-    return DEMO_FINDINGS.filter((f) => f.finding_id.includes("eslint"));
+
+  if (cleanId === "repo_gin" || repo.name.toLowerCase().includes("gin")) {
+    return [
+      {
+        finding_id: "find_gin_gosec_g601",
+        rule_id: "GoSec-G601 / DATA-RACE-1420",
+        severity: "HIGH",
+        confidence: "HIGH",
+        status: "DOCUMENTED_ACCEPTED",
+        scanner: "GoSec / Race Detector",
+        path: "pkg/gin/context.go",
+        line_start: 124,
+        line_end: 136,
+        message: "Memory aliasing & use-after-free hazard: *gin.Context pointer escaping to background goroutines without c.Copy().",
+        url: "https://github.com/gin-gonic/gin/pull/1420",
+        label: "GoSec G601",
+        related_decisions: [
+          {
+            decision_id: "dec-gin-pool",
+            summary: "Mandatory c.Copy() on goroutine boundaries",
+            rationale: "sync.Pool recycles *gin.Context upon request completion. Crossing goroutine boundaries without deep copy causes memory corruption.",
+            evidence_url: "https://github.com/gin-gonic/gin/pull/1420",
+            rationale_type: "memory_safety",
+          },
+        ],
+      },
+      {
+        finding_id: "find_gin_gosec_g104",
+        rule_id: "GoSec-G104",
+        severity: "MEDIUM",
+        confidence: "MEDIUM",
+        status: "REVIEWED_SAFE",
+        scanner: "GoSec",
+        path: "pkg/gin/response_writer.go",
+        line_start: 45,
+        line_end: 52,
+        message: "Errors unhandled on ResponseWriter.Write() during client connection drop.",
+        url: "https://github.com/securego/gosec#g104",
+        label: "GoSec G104",
+        related_decisions: [
+          {
+            decision_id: "dec-gin-client-abort",
+            summary: "Ignore client connection resets on streaming handlers",
+            rationale: "Client aborts during active flush are non-fatal and expected in long-polling HTTP APIs.",
+            evidence_url: "https://github.com/gin-gonic/gin/pull/1892",
+            rationale_type: "expected_network_behavior",
+          },
+        ],
+      },
+      {
+        finding_id: "find_gin_panic_leak",
+        rule_id: "GoSec-G204",
+        severity: "MEDIUM",
+        confidence: "HIGH",
+        status: "DOCUMENTED_ACCEPTED",
+        scanner: "GoSec Linter",
+        path: "pkg/gin/recovery.go",
+        line_start: 68,
+        line_end: 75,
+        message: "Potential sensitive stack trace and environment variable leakage in custom PanicHandler.",
+        url: "https://github.com/gin-gonic/gin/blob/master/recovery.go",
+        label: "GoSec G204",
+        related_decisions: [
+          {
+            decision_id: "dec-gin-panic",
+            summary: "Mask production stack traces unless in gin.DebugMode",
+            rationale: "Engine suppresses raw internal runtime stack traces in release mode to prevent forensic data leakage.",
+            evidence_url: "https://github.com/gin-gonic/gin/pull/1610",
+            rationale_type: "framework_protection",
+          },
+        ],
+      },
+      {
+        finding_id: "find_gin_debug_pprof",
+        rule_id: "GoSec-G108",
+        severity: "LOW",
+        confidence: "HIGH",
+        status: "REVIEWED_SAFE",
+        scanner: "GoSec",
+        path: "pkg/gin/gin.go",
+        line_start: 88,
+        line_end: 94,
+        message: "Profiling endpoint /debug/pprof automatically registered in debug mode.",
+        url: "https://pkg.go.dev/net/http/pprof",
+        label: "Debug Profiler Exemption",
+        related_decisions: [
+          {
+            decision_id: "dec-gin-pprof",
+            summary: "Debug profiler confined to development flag",
+            rationale: "Profiling routes are conditionally mounted only when GIN_MODE=debug.",
+            evidence_url: "https://github.com/gin-gonic/gin/pull/1204",
+            rationale_type: "environment_precedence",
+          },
+        ],
+      },
+    ];
   }
-  if (repoId === "repo_gin") {
-    return [];
+
+  if (cleanId === "repo_express" || repo.name.toLowerCase().includes("express")) {
+    return [
+      {
+        finding_id: "find_express_arity_cve",
+        rule_id: "CVE-2024-EXPRESS-ARITY",
+        severity: "HIGH",
+        confidence: "HIGH",
+        status: "DOCUMENTED_ACCEPTED",
+        scanner: "ESLint Security / Semgrep",
+        path: "lib/router/layer.js",
+        line_start: 68,
+        line_end: 85,
+        message: "Middleware arity bypass: Omitting 4th argument causes Express router to bypass error handling boundary.",
+        url: "https://github.com/expressjs/express/pull/2841",
+        label: "Express Arity Invariant",
+        related_decisions: [
+          {
+            decision_id: "dec-express-arity",
+            summary: "Preserve 4-parameter arity signature on error middleware",
+            rationale: "Router reflection explicitly checks fn.length === 4 to distinguish error handlers from standard request handlers.",
+            evidence_url: "https://github.com/expressjs/express/pull/2841",
+            rationale_type: "framework_contract",
+          },
+        ],
+      },
+      {
+        finding_id: "find_eslint_buffer",
+        rule_id: "security/detect-new-buffer",
+        severity: "LOW",
+        confidence: "HIGH",
+        status: "DOCUMENTED_ACCEPTED",
+        scanner: "ESLint Security",
+        path: "lib/utils.js",
+        line_start: 22,
+        line_end: 25,
+        message: "Use of new Buffer() deprecated in Node.js 10+ due to uninitialized memory exposure.",
+        url: "https://eslint.org/docs/rules/no-buffer-constructor",
+        label: "ESLint Buffer",
+        related_decisions: [
+          {
+            decision_id: "dec-express-2",
+            summary: "Migrate to Buffer.from() / Buffer.alloc() with Node 8 fallback polyfill",
+            rationale: "Polyfill maintains backward compatibility for legacy Node runtime environments.",
+            evidence_url: "https://github.com/expressjs/express/pull/3650",
+            rationale_type: "compatibility_exemption",
+          },
+        ],
+      },
+      {
+        finding_id: "find_eslint_redos",
+        rule_id: "security/detect-non-literal-regexp",
+        severity: "MEDIUM",
+        confidence: "MEDIUM",
+        status: "REVIEWED_SAFE",
+        scanner: "ESLint Security",
+        path: "lib/router/index.js",
+        line_start: 140,
+        line_end: 148,
+        message: "Regular Expression Denial of Service (ReDoS) vulnerability in dynamic route parameter compiler.",
+        url: "https://cwe.mitre.org/data/definitions/1333.html",
+        label: "ReDoS Invariant",
+        related_decisions: [
+          {
+            decision_id: "dec-express-redos",
+            summary: "Sanitize regex parameters via path-to-regexp parser",
+            rationale: "Route path patterns compiled with strict quantifiers to eliminate exponential backtracking.",
+            evidence_url: "https://github.com/expressjs/express/pull/4210",
+            rationale_type: "framework_protection",
+          },
+        ],
+      },
+      {
+        finding_id: "find_eslint_random",
+        rule_id: "security/detect-pseudoRandomBytes",
+        severity: "MEDIUM",
+        confidence: "HIGH",
+        status: "DOCUMENTED_ACCEPTED",
+        scanner: "Semgrep Node",
+        path: "lib/request.js",
+        line_start: 95,
+        line_end: 102,
+        message: "Weak pseudoRandomBytes utilized in session ID generator fallback.",
+        url: "https://semgrep.dev/p/node-pseudoRandomBytes",
+        label: "Crypto Random Invariant",
+        related_decisions: [
+          {
+            decision_id: "dec-express-crypto",
+            summary: "Crypto.randomBytes mandatory for all session identifiers",
+            rationale: "Cryptographically secure entropy used for cookies; pseudo-random fallback kept only in test mode.",
+            evidence_url: "https://github.com/expressjs/express/pull/3100",
+            rationale_type: "cryptographic_integrity",
+          },
+        ],
+      },
+    ];
   }
-  return DEMO_FINDINGS.filter((f) => !f.finding_id.includes("spotbugs") && !f.finding_id.includes("eslint"));
+
+  if (cleanId === "repo_flask" || repo.name.toLowerCase() === "flask") {
+    return [
+      {
+        finding_id: "find_bandit_b324",
+        rule_id: "B324",
+        severity: "HIGH",
+        confidence: "HIGH",
+        status: "DOCUMENTED_ACCEPTED",
+        scanner: "Bandit",
+        path: "src/flask/sessions.py",
+        line_start: 42,
+        line_end: 45,
+        message: "Use of insecure MD5 or SHA1 hash function in TaggedJSONSerializer HMAC signer.",
+        url: "https://bandit.readthedocs.io/en/latest/plugins/b324_hashlib.html",
+        label: "Bandit B324",
+        related_decisions: [
+          {
+            decision_id: "dec-1",
+            summary: "Keep SHA-1 for TaggedJSONSerializer",
+            rationale:
+              "Hash is used strictly for HMAC cookie signatures, not passwords. Kept for mobile client backward compatibility (PR #5460).",
+            evidence_url: "https://github.com/pallets/flask/pull/5460",
+            rationale_type: "compatibility_exemption",
+          },
+        ],
+      },
+      {
+        finding_id: "find_semgrep_xss",
+        rule_id: "python.flask.security.xss",
+        severity: "MEDIUM",
+        confidence: "MEDIUM",
+        status: "REVIEWED_SAFE",
+        scanner: "Semgrep",
+        path: "src/flask/templating.py",
+        line_start: 88,
+        line_end: 94,
+        message: "Rendering untrusted template string without explicit HTML markup escaping.",
+        url: "https://semgrep.dev/p/flask-xss",
+        label: "Semgrep XSS",
+        related_decisions: [
+          {
+            decision_id: "dec-xss",
+            summary: "Jinja autoescaping enabled globally in Environment config",
+            rationale: "Default environment autoescaping handles HTML/XML contexts automatically.",
+            evidence_url: "https://github.com/pallets/flask/pull/3110",
+            rationale_type: "framework_protection",
+          },
+        ],
+      },
+      {
+        finding_id: "find_bandit_b506",
+        rule_id: "B506",
+        severity: "MEDIUM",
+        confidence: "HIGH",
+        status: "DOCUMENTED_ACCEPTED",
+        scanner: "Bandit",
+        path: "src/flask/config.py",
+        line_start: 120,
+        line_end: 128,
+        message: "Use of unsafe yaml.load() or unpickled environment variables in custom configuration loader.",
+        url: "https://bandit.readthedocs.io/en/latest/plugins/b506_yaml_load.html",
+        label: "Bandit B506",
+        related_decisions: [
+          {
+            decision_id: "dec-b506",
+            summary: "Config restricted to safe dictionary deserializers",
+            rationale: "SafeLoader enforced across YAML configuration files to prevent arbitrary object instantiation.",
+            evidence_url: "https://github.com/pallets/flask/pull/2104",
+            rationale_type: "framework_protection",
+          },
+        ],
+      },
+      {
+        finding_id: "find_bandit_b105",
+        rule_id: "B105",
+        severity: "LOW",
+        confidence: "HIGH",
+        status: "REVIEWED_SAFE",
+        scanner: "Bandit",
+        path: "src/flask/app.py",
+        line_start: 240,
+        line_end: 246,
+        message: "Hardcoded test secret key fallback detected in development default config.",
+        url: "https://bandit.readthedocs.io/en/latest/plugins/b105_hardcoded_password_string.html",
+        label: "Bandit B105",
+        related_decisions: [
+          {
+            decision_id: "dec-b105",
+            summary: "Development fixture fallback key exemption",
+            rationale: "Default test secret key allowed only during unit test execution; startup warning raised if SECRET_KEY unset in production.",
+            evidence_url: "https://github.com/pallets/flask/pull/4012",
+            rationale_type: "compatibility_exemption",
+          },
+        ],
+      },
+    ];
+  }
+
+  // Universal / Any custom imported repository
+  const isPython = repo.full_name.includes("py") || repo.name.includes("python");
+  const isJava = repo.full_name.includes("java") || repo.name.includes("spring");
+  const isGo = repo.full_name.includes("go") || repo.name.includes("gin");
+
+  const corePath = isJava
+    ? "src/main/java/core/Handler.java"
+    : isGo
+      ? "pkg/handler/handler.go"
+      : isPython
+        ? "src/core/handler.py"
+        : "src/core/handler.ts";
+
+  const apiPath = isJava
+    ? "src/main/java/api/Router.java"
+    : isGo
+      ? "pkg/api/router.go"
+      : isPython
+        ? "src/api/routes.py"
+        : "src/api/router.ts";
+
+  const manifestPath = isJava
+    ? "pom.xml"
+    : isGo
+      ? "go.mod"
+      : isPython
+        ? "requirements.txt"
+        : "package.json";
+
+  const configPath = isJava
+    ? "src/main/resources/application.yml"
+    : isGo
+      ? "config/config.yaml"
+      : isPython
+        ? "config.py"
+        : "config/default.json";
+
+  return [
+    {
+      finding_id: `find_${repo.name}_ast_contract`,
+      rule_id: "WhyCode/AST-Contract-Bypass",
+      severity: "HIGH",
+      confidence: "HIGH",
+      status: "DOCUMENTED_ACCEPTED",
+      scanner: "WhyCode AST Security Scanner",
+      path: corePath,
+      line_start: 42,
+      line_end: 58,
+      message: `Public interface in ${repo.name} requires strict input validation contract before dispatching to downstream handlers.`,
+      url: `https://github.com/${repo.full_name}/pull/108`,
+      label: "AST Contract Boundary",
+      related_decisions: [
+        {
+          decision_id: `dec-${repo.name}-contract`,
+          summary: `Enforce AST input validation contract for ${repo.name}`,
+          rationale: `PR #108 established that all inbound payloads must be normalized before crossing caller boundaries to prevent downstream state corruption.`,
+          evidence_url: `https://github.com/${repo.full_name}/pull/108`,
+          rationale_type: "contract_boundary",
+        },
+      ],
+    },
+    {
+      finding_id: `find_${repo.name}_cve_dep`,
+      rule_id: "CVE/Dependency-Audit",
+      severity: "MEDIUM",
+      confidence: "HIGH",
+      status: "REVIEWED_SAFE",
+      scanner: "CVE Invariant Verifier",
+      path: manifestPath,
+      line_start: 12,
+      line_end: 18,
+      message: `Transitive dependency locked for backward compatibility with downstream callers.`,
+      url: `https://github.com/${repo.full_name}/pull/108`,
+      label: "CVE Dependency Audit",
+      related_decisions: [
+        {
+          decision_id: `dec-${repo.name}-dep`,
+          summary: `Lock transitive dependency version for ${repo.name}`,
+          rationale: `Upgrading immediately would cause breaking API regressions with enterprise consumers; security patch evaluated as non-exploitable in current call graph.`,
+          evidence_url: `https://github.com/${repo.full_name}/pull/108`,
+          rationale_type: "compatibility_exemption",
+        },
+      ],
+    },
+    {
+      finding_id: `find_${repo.name}_error_leak`,
+      rule_id: "WhyCode/Sensitive-Error-Leak",
+      severity: "MEDIUM",
+      confidence: "MEDIUM",
+      status: "DOCUMENTED_ACCEPTED",
+      scanner: "Polyglot Security Linter",
+      path: apiPath,
+      line_start: 34,
+      line_end: 42,
+      message: `Error boundary masks internal runtime diagnostics in production HTTP responses.`,
+      url: `https://github.com/${repo.full_name}/pull/108`,
+      label: "Error Masking Invariant",
+      related_decisions: [
+        {
+          decision_id: `dec-${repo.name}-error`,
+          summary: `Standardize API error envelope and isolate debug diagnostics`,
+          rationale: `Sanitizes error traces to prevent exposing environment variables or internal database connection strings.`,
+          evidence_url: `https://github.com/${repo.full_name}/pull/108`,
+          rationale_type: "framework_protection",
+        },
+      ],
+    },
+    {
+      finding_id: `find_${repo.name}_secret_entropy`,
+      rule_id: "Security/Entropy-Detector",
+      severity: "LOW",
+      confidence: "MEDIUM",
+      status: "REVIEWED_SAFE",
+      scanner: "Entropy Scanner",
+      path: configPath,
+      line_start: 8,
+      line_end: 14,
+      message: `Default fallback credentials detected in sample configuration template.`,
+      url: `https://github.com/${repo.full_name}/pull/108`,
+      label: "Config Template Exemption",
+      related_decisions: [
+        {
+          decision_id: `dec-${repo.name}-template`,
+          summary: `Template config exempted for local onboarding`,
+          rationale: `Sample credentials only apply to local tests; runtime environment variables take precedence in production containers.`,
+          evidence_url: `https://github.com/${repo.full_name}/pull/108`,
+          rationale_type: "environment_precedence",
+        },
+      ],
+    },
+  ];
 }
 
 export function addCustomRepo(fullName: string, defaultBranch = "main"): Repo {
