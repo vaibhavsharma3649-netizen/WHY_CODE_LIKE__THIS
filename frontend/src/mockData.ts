@@ -1,7 +1,9 @@
 import type {
   AdminRepo,
   AdminUser,
+  AgentContextItem,
   AgentRun,
+  AgentStep,
   AgentTask,
   AskResult,
   AuthConfig,
@@ -13,6 +15,7 @@ import type {
   Membership,
   Overview,
   Repo,
+  RunState,
   TimelineItem,
   User,
 } from "./types";
@@ -1700,17 +1703,13 @@ All teardown context handlers are guaranteed to execute synchronously before the
 export function localAiInference(question: string, repoId = "repo_flask", mode = "auto"): AskResult {
   const q = question.toLowerCase();
   const repo = DEMO_REPOS.find((r) => r.repo_id === repoId) ?? DEMO_REPO_FLASK;
+  const isFlask = repoId === "repo_flask" || repo.name.toLowerCase() === "flask";
+  const isSpring = repoId === "repo_spring" || repo.name.toLowerCase().includes("spring") || q.includes("spring");
+  const isGin = repoId === "repo_gin" || repo.name.toLowerCase().includes("gin") || q.includes("gin");
+  const isExpress = repoId === "repo_express" || repo.name.toLowerCase().includes("express") || q.includes("express");
 
   // 1. JAVA / SPRING BOOT DOMAIN
-  if (
-    repoId === "repo_spring" ||
-    q.includes("spring") ||
-    q.includes("bean") ||
-    q.includes("java") ||
-    q.includes("conditional") ||
-    q.includes("securityfilterchain") ||
-    q.includes("springboot")
-  ) {
+  if (isSpring) {
     if (
       q.includes("conditional") ||
       q.includes("missing") ||
@@ -1830,14 +1829,7 @@ public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
   }
 
   // 2. GO / GIN DOMAIN
-  if (
-    repoId === "repo_gin" ||
-    q.includes("gin") ||
-    q.includes("go") ||
-    q.includes("golang") ||
-    q.includes("pool") ||
-    q.includes("radix")
-  ) {
+  if (isGin) {
     if (q.includes("pool") || q.includes("context") || q.includes("goroutine") || q.includes("alloc") || q.includes("memory")) {
       return {
         answer: `In **pkg/gin.go**, \`gin.Engine\` recycles \`*gin.Context\` instances using a \`sync.Pool\` [ev1] to maintain zero heap allocations per HTTP request.
@@ -1897,14 +1889,7 @@ PR #1420 by Manu Martinez-Almeida [ev2] established this design: by pooling cont
   }
 
   // 3. JAVASCRIPT / TYPESCRIPT / EXPRESS DOMAIN
-  if (
-    repoId === "repo_express" ||
-    q.includes("express") ||
-    q.includes("middleware") ||
-    q.includes("error") ||
-    q.includes("javascript") ||
-    q.includes("typescript")
-  ) {
+  if (isExpress) {
     return {
       answer: `In **lib/router/layer.js**, Express explicitly inspects \`fn.length === 4\` [ev1] using JavaScript runtime reflection to register error-handling middleware.
 
@@ -1960,61 +1945,170 @@ PR #2841 by Douglas Christopher Wilson [ev2] verified this core architectural in
     };
   }
 
-  // 4. PYTHON / FLASK DEFAULT (or questions matching SHA-1 / WSGI)
-  if (q.includes("sha") || q.includes("hash") || q.includes("b324") || q.includes("cookie") || q.includes("token")) {
-    return DEMO_ASK_ANSWERS.sha1;
+  // 4. PYTHON / FLASK DOMAIN
+  if (isFlask) {
+    if (q.includes("sha") || q.includes("hash") || q.includes("b324") || q.includes("session") || q.includes("cookie") || q.includes("token")) {
+      return DEMO_ASK_ANSWERS.sha1;
+    }
+    if (q.includes("wsgi") || q.includes("teardown") || q.includes("context") || q.includes("app.py") || q.includes("sync")) {
+      return DEMO_ASK_ANSWERS.default;
+    }
+    if (q.includes("blueprint") || q.includes("route") || q.includes("url") || q.includes("endpoint")) {
+      return {
+        answer: `In **src/flask/blueprints.py**, Flask organizes modular endpoint registration via the \`Blueprint\` and \`BlueprintSetupState\` interfaces [ev1].
+
+PR #3210 established the invariant that blueprints record deferred route registration callbacks until \`app.register_blueprint()\` attaches them to the primary \`Map\` routing table [ev2]. This prevents premature URL adapter binding before configuration and middleware are completely finalized.
+
+### Blueprint Architecture Invariant
+> **Invariant #3210 (Deferred Routing Registration):**
+> Blueprints must not mutate global dispatch maps until application initialization is sealed. Direct mutations risk route collision and un-prefixed URL leaks in production WSGI containers [ev3].`,
+        citations: [
+          {
+            id: "ev1",
+            kind: "code",
+            label: "Code",
+            title: "src/flask/blueprints.py (BlueprintSetupState.add_url_rule)",
+            path: "src/flask/blueprints.py",
+            line_start: 112,
+            line_end: 135,
+            commit_sha: "7d2b8e4f",
+            snippet: `def add_url_rule(self, rule: str, endpoint: str | None = None, view_func: ft.Callable | None = None, **options: t.Any) -> None:
+    if self.url_prefix is not None:
+        rule = f"{self.url_prefix}{rule}"
+    self.app.add_url_rule(rule, f"{self.blueprint.name}.{endpoint}", view_func, **options)`,
+          },
+          {
+            id: "ev2",
+            kind: "decision",
+            label: "Decision",
+            title: "Decision #3210: Deferred Blueprint Attachment",
+            snippet: "Keep blueprint registrations deferred to ensure URL prefixes and subdomain rules apply atomically.",
+          },
+          {
+            id: "ev3",
+            kind: "finding",
+            label: "Finding",
+            title: "WhyCode Route Safety Oracle",
+            snippet: "All blueprint routing maps verified. Zero prefix collisions detected.",
+          },
+        ],
+        evidence: [],
+        mode: mode as any,
+        abstained: false,
+        confidence: "high",
+        timings: { retrieve: 16, total: 32, vector_disabled: false },
+        audit_id: "aud_flk_" + Math.random().toString(16).slice(2, 10),
+        indexed_sha: repo.indexed_sha ?? "7d2b8e4f",
+        engine: "local-fine-tuned:flask-reasoner-v1",
+        grounding: { total_claims: 3, supported_claims: 3, unsupported_claims: 0, grounding_verdict: "VERIFIED" },
+      };
+    }
   }
-  if (q.includes("wsgi") || q.includes("teardown") || q.includes("sync") || q.includes("app.py")) {
-    return DEMO_ASK_ANSWERS.default;
+
+  // 5. UNIVERSAL / ANY REPO & QUESTION REASONING ENGINE
+  const isSecurity = q.includes("security") || q.includes("vuln") || q.includes("cve") || q.includes("token") || q.includes("auth") || q.includes("permission") || q.includes("secret") || q.includes("audit");
+  const isRouting = q.includes("route") || q.includes("router") || q.includes("url") || q.includes("endpoint") || q.includes("controller") || q.includes("handler") || q.includes("api");
+  const isConcurrency = q.includes("async") || q.includes("thread") || q.includes("concurrency") || q.includes("race") || q.includes("pool") || q.includes("memory") || q.includes("leak") || q.includes("performance");
+  const isError = q.includes("error") || q.includes("exception") || q.includes("catch") || q.includes("fail") || q.includes("recovery") || q.includes("rejection");
+  const isWhy = q.startsWith("why") || q.includes("reason") || q.includes("decision") || q.includes("rationale") || q.includes("invariant") || q.includes("why is");
+  const isTesting = q.includes("test") || q.includes("verify") || q.includes("oracle") || q.includes("sandbox") || q.includes("regression") || q.includes("spec");
+
+  // Determine repository language & primary file paths
+  const lang = (repo.counts?.files ?? 0) > 0 ? "polyglot" : "universal";
+  const primaryPath = repo.full_name.includes("spring")
+    ? "src/main/java/Application.java"
+    : repo.full_name.includes("gin")
+      ? "pkg/gin/gin.go"
+      : repo.full_name.includes("express")
+        ? "lib/express.js"
+        : repo.full_name.includes("flask")
+          ? "src/flask/app.py"
+          : "src/index.ts";
+
+  let topicHeading = "Core Architectural Contracts";
+  let topicSummary = `In **${repo.full_name}** on branch \`${repo.default_branch ?? "main"}\`, WhyCode's multi-language AST engine indexes ${repo.counts?.files ?? 42} source files and ${repo.counts?.entities ?? 318} code symbols [ev1].`;
+  let invariantDetail = `Code entities in this revision maintain backwards compatibility contracts with downstream callers. Proposed refactors must satisfy the counterfactual test oracle and pass isolated micro-VM sandbox attestation before merging [ev2].`;
+  let blastRadiusDetail = `Modifications to core interfaces have a multi-hop blast radius across transitive callers. WhyCode validates that all symbol boundaries remain intact [ev3].`;
+
+  if (isSecurity) {
+    topicHeading = "Security Boundaries & Invariant Enclosure";
+    topicSummary = `Security analysis for **${repo.full_name}** verifies that authentication barriers, credential validation, and input sanitization remain strictly enforced [ev1].`;
+    invariantDetail = `All security-sensitive call paths are protected by recorded architectural invariants. Any automated PR that alters hashing, session verification, or role checks triggers the WhyCode Invariant Oracle [ev2].`;
+    blastRadiusDetail = `Zero unverified vulnerabilities detected. Downstream access tokens and request boundaries remain protected against unauthorized escalation [ev3].`;
+  } else if (isRouting) {
+    topicHeading = "Request Routing & Controller Dispatch Flow";
+    topicSummary = `In **${repo.full_name}**, request routing maps inbound HTTP patterns through registered middleware chains and controller handlers [ev1].`;
+    invariantDetail = `Endpoint registration guarantees that path parameters, headers, and query arguments are parsed without leaking unhandled exceptions to client responses [ev2].`;
+    blastRadiusDetail = `WhyCode's AST graph traces the complete route hierarchy to guarantee that URL prefixing, sub-routing, and fallback handlers do not collide [ev3].`;
+  } else if (isConcurrency) {
+    topicHeading = "Concurrency Safety & Resource Lifecycle";
+    topicSummary = `Analysis of **${repo.full_name}** confirms that background operations, context passing, and shared resources conform to thread-safety invariants [ev1].`;
+    invariantDetail = `Resource pools and context pointers are managed synchronously within worker lifecycles. Detached asynchronous routines must clone state to prevent data races and use-after-free corruption [ev2].`;
+    blastRadiusDetail = `Memory allocations and connection cleanup routines are validated to execute prior to thread release, preventing worker pool starvation [ev3].`;
+  } else if (isError) {
+    topicHeading = "Error Propagation & Boundary Recovery";
+    topicSummary = `Exception handling in **${repo.full_name}** enforces uniform error normalization and recovery cascades [ev1].`;
+    invariantDetail = `Boundary middleware captures unhandled exceptions, logs forensic telemetry, and formats structured error responses without leaking internal stack traces [ev2].`;
+    blastRadiusDetail = `Failure recovery handlers maintain backwards-compatible error signatures across all consumer APIs [ev3].`;
+  } else if (isWhy) {
+    topicHeading = "Recorded Architectural Rationale & Decisions";
+    topicSummary = `WhyCode's Engineering Memory Graph indexes the recorded PR discussions, commit history, and architectural decisions governing **${repo.full_name}** [ev1].`;
+    invariantDetail = `The current implementation was designed to preserve legacy client contracts, prevent silent regressions, and ensure seamless backward compatibility [ev2].`;
+    blastRadiusDetail = `Reversing this architectural invariant threatens downstream consumers across the repository's dependency graph [ev3].`;
+  } else if (isTesting) {
+    topicHeading = "Invariant Verification & Sandbox Attestation";
+    topicSummary = `WhyCode validates **${repo.full_name}** by synthesizing counterfactual test oracles from historical PR contracts and executing them in isolated gVisor sandboxes [ev1].`;
+    invariantDetail = `Tests confirm that proposed refactorings preserve both functional correctness and non-functional guarantees (security, concurrency, backwards compatibility) [ev2].`;
+    blastRadiusDetail = `Synthesized dual-adapter self-healing patches ensure zero regressions before code reaches production [ev3].`;
   }
 
-  // 5. UNIVERSAL / CUSTOM REPO FINE-TUNED ANSWERING
-  return {
-    answer: `In **${repo.full_name}** on branch \`${repo.default_branch ?? "main"}\`, WhyCode's knowledge graph indexes ${repo.counts?.files ?? 42} files and ${repo.counts?.entities ?? 318} code entities [ev1].
+  const dynamicAnswer = `### ${topicHeading}
+${topicSummary}
 
-The repository is governed by active architectural invariants and recorded historical decisions [ev2]. All symbol modifications, imports, and call hierarchies are continuously validated against Neo4j multi-hop call graphs to prevent regressions.
+Regarding your query: *"${question}"*
 
-### Architectural Invariant Status
+${invariantDetail}
+
+### Invariant & Blast Radius
 > **Verified Invariant (Active Memory):**
-> Code entities in this revision maintain backwards compatibility contracts with downstream callers. Proposed refactors must satisfy the counterfactual test oracle and pass isolated micro-VM sandbox attestation before merging [ev3].`,
+> ${blastRadiusDetail}
+
+WhyCode's AST graph continuously verifies all caller hierarchies in **${repo.full_name}** to prevent unexpected regressions.`;
+
+  return {
+    answer: dynamicAnswer,
     citations: [
       {
         id: "ev1",
         kind: "code",
         label: "Code",
-        title: `${repo.full_name} Core Architecture`,
-        path: repo.full_name.includes("spring")
-          ? "src/main/java"
-          : repo.full_name.includes("express")
-            ? "lib/express.js"
-            : repo.full_name.includes("gin")
-              ? "pkg/gin.go"
-              : "src/flask/app.py",
+        title: `${repo.name} Core Architecture (${primaryPath})`,
+        path: primaryPath,
         line_start: 1,
         line_end: 45,
         commit_sha: repo.indexed_sha ?? "7d2b8e4f",
-        snippet: `// ${repo.full_name} indexed revision ${repo.indexed_sha ?? "latest"}\n// Validated by WhyCode Neo4j Engineering Memory Graph`,
+        snippet: `// ${repo.full_name} (${lang}) on branch ${repo.default_branch ?? "main"}\n// Indexed by WhyCode Engineering Memory Graph\n// Invariant Contracts: Verified across ${repo.counts?.entities ?? 250} entities`,
       },
       {
         id: "ev2",
         kind: "decision",
         label: "Decision",
-        title: `${repo.name.toUpperCase()} Architecture Invariant`,
-        snippet: `Recorded architectural decisions and call graph contracts active for ${repo.full_name}.`,
+        title: `${repo.name.toUpperCase()} Architecture Invariant & Contract`,
+        snippet: `Architectural constraints and compatibility guarantees active for ${repo.full_name}.`,
       },
       {
         id: "ev3",
         kind: "finding",
         label: "Finding",
         title: "WhyCode Invariant Verification Oracle",
-        snippet: "Zero unreviewed regressions detected. All AST call boundaries verified.",
+        snippet: "Zero regressions detected. Micro-VM sandbox attestation confirmed.",
       },
     ],
     evidence: [],
     mode: mode as any,
     abstained: false,
     confidence: "high",
-    timings: { retrieve: 18, total: 36, vector_disabled: false },
+    timings: { retrieve: 18, total: 32, vector_disabled: false },
     audit_id: "aud_gen_" + Math.random().toString(16).slice(2, 10),
     indexed_sha: repo.indexed_sha ?? "7d2b8e4f",
     engine: "local-fine-tuned:invariant-reasoner-v1",
@@ -2162,26 +2256,407 @@ export function addCustomRepo(fullName: string, defaultBranch = "main"): Repo {
 }
 
 
-export const DEMO_TASKS: Array<{ task: AgentTask; run_count: number }> = [
-  {
-    task: {
-      task_id: "task_argosx_invariant_audit",
-      title: "Audit Session Invariants for ArgosX Handover",
-      goal: "Extract all active decisions and constraints on sessions.py and generate CLAUDE.md guardrails.",
-      status: "COMPLETED",
-      current_step: "step_4",
-      summary: "Identified 3 active invariants and Bandit B324 documented rationale. Ready for agent handover.",
-      repo_id: "repo_flask",
-      created_at: new Date(Date.now() - 3600000).toISOString(),
-    },
-    run_count: 2,
-  },
-];
+// ==========================================
+// STATEFUL AGENT RUNS & TASKS MOCK STORE
+// ==========================================
 
-export const DEMO_RUNS: AgentRun[] = [
-  {
-    run_id: "run_argosx_01",
-    task_id: "task_argosx_invariant_audit",
+const _tasksByRepo: Record<string, Array<{ task: AgentTask; run_count: number }>> = {};
+const _runsByTask: Record<string, AgentRun[]> = {};
+const _runStates: Record<string, RunState> = {};
+
+function initRepoTasks(repoId: string): Array<{ task: AgentTask; run_count: number }> {
+  if (_tasksByRepo[repoId]) return _tasksByRepo[repoId];
+
+  const repo = DEMO_REPOS.find((r) => r.repo_id === repoId) ?? DEMO_REPO_FLASK;
+  let taskList: Array<{ task: AgentTask; run_count: number }> = [];
+
+  if (repoId === "repo_flask") {
+    taskList = [
+      {
+        task: {
+          task_id: "task_flask_session_audit",
+          title: "Audit Session Invariants for ArgosX Handover",
+          goal: "Extract all active decisions and constraints on sessions.py and generate CLAUDE.md guardrails.",
+          status: "COMPLETED",
+          current_step: "step_4",
+          summary: "Identified 3 active invariants and Bandit B324 documented rationale. Ready for agent handover.",
+          repo_id: repoId,
+          created_at: new Date(Date.now() - 3600000).toISOString(),
+        },
+        run_count: 1,
+      },
+      {
+        task: {
+          task_id: "task_flask_wsgi_teardown",
+          title: "Verify Synchronous WSGI Context Lifecycle",
+          goal: "Verify teardown_appcontext callbacks execute synchronously before worker threads accept new requests.",
+          status: "RUNNING",
+          current_step: "step_2",
+          summary: "Inspecting AppContext.pop() and database connection pool cleanup hooks.",
+          repo_id: repoId,
+          created_at: new Date(Date.now() - 1800000).toISOString(),
+        },
+        run_count: 1,
+      },
+    ];
+  } else if (repoId === "repo_spring") {
+    taskList = [
+      {
+        task: {
+          task_id: "task_spring_sec_filter",
+          title: "Audit SecurityFilterChain Bean Precedence (Java)",
+          goal: "Verify CVE-2023-34035 @Order precedence between custom SecurityFilterChain and Actuator endpoints.",
+          status: "COMPLETED",
+          current_step: "step_3",
+          summary: "Enforced @Order(HIGHEST_PRECEDENCE + 50). Actuator /actuator/env endpoints safely isolated.",
+          repo_id: repoId,
+          created_at: new Date(Date.now() - 3600000).toISOString(),
+        },
+        run_count: 1,
+      },
+      {
+        task: {
+          task_id: "task_spring_autoconfig_check",
+          title: "Audit @ConditionalOnMissingBean Starter Invariants",
+          goal: "Verify that starter bean definitions yield cleanly to application-level bean overrides across 120+ modules.",
+          status: "RUNNING",
+          current_step: "step_1",
+          summary: "Traversing AutoConfigurationPackages dependency tree.",
+          repo_id: repoId,
+          created_at: new Date(Date.now() - 1200000).toISOString(),
+        },
+        run_count: 1,
+      },
+    ];
+  } else if (repoId === "repo_gin") {
+    taskList = [
+      {
+        task: {
+          task_id: "task_gin_syncpool_audit",
+          title: "Verify Context sync.Pool Escape & Concurrency (Go)",
+          goal: "Ensure *gin.Context escaping to goroutines strictly uses c.Copy() to prevent use-after-free data races.",
+          status: "COMPLETED",
+          current_step: "step_3",
+          summary: "Verified INV-1420 contract. Deep context copy eliminates data race warning on recycled pool objects.",
+          repo_id: repoId,
+          created_at: new Date(Date.now() - 3600000).toISOString(),
+        },
+        run_count: 1,
+      },
+      {
+        task: {
+          task_id: "task_gin_engine_recovery",
+          title: "Audit Engine Middleware Recovery Cascade",
+          goal: "Inspect Recovery() and Logger() middleware handler ordering in Engine.handleHTTPRequest.",
+          status: "RUNNING",
+          current_step: "step_1",
+          summary: "Analyzing middleware dispatch chain in pkg/gin/gin.go.",
+          repo_id: repoId,
+          created_at: new Date(Date.now() - 1200000).toISOString(),
+        },
+        run_count: 1,
+      },
+    ];
+  } else if (repoId === "repo_express") {
+    taskList = [
+      {
+        task: {
+          task_id: "task_express_error_arity",
+          title: "Audit 4-Argument Error Middleware Arity (Node.js)",
+          goal: "Verify fn.length === 4 arity invariant across all router error boundaries to prevent unhandled rejections.",
+          status: "COMPLETED",
+          current_step: "step_3",
+          summary: "Layer.prototype.handle_error arity contract confirmed. Prevents error handler bypass.",
+          repo_id: repoId,
+          created_at: new Date(Date.now() - 3600000).toISOString(),
+        },
+        run_count: 1,
+      },
+      {
+        task: {
+          task_id: "task_express_router_async",
+          title: "Audit Route Layer Async Exception Forwarding",
+          goal: "Inspect router layer dispatch to verify promise rejection forwarding across next() callbacks.",
+          status: "RUNNING",
+          current_step: "step_1",
+          summary: "Analyzing router dispatch cascade.",
+          repo_id: repoId,
+          created_at: new Date(Date.now() - 900000).toISOString(),
+        },
+        run_count: 1,
+      },
+    ];
+  } else {
+    // Dynamic tasks for custom imported repo
+    taskList = [
+      {
+        task: {
+          task_id: `task_${repo.name}_invariant_audit`,
+          title: `Audit Core Invariants for ${repo.name} Handover`,
+          goal: `Extract all active architectural constraints, call boundaries, and dependencies for ${repo.full_name}.`,
+          status: "RUNNING",
+          current_step: "step_2",
+          summary: `Analyzing ${repo.counts?.files ?? 30} files and ${repo.counts?.entities ?? 250} AST entities. Zero regressions detected.`,
+          repo_id: repoId,
+          created_at: new Date(Date.now() - 1800000).toISOString(),
+        },
+        run_count: 1,
+      },
+      {
+        task: {
+          task_id: `task_${repo.name}_blast_radius`,
+          title: `Verify AST Call Boundaries & Blast Radius`,
+          goal: `Traverse AST call graph across public interface boundaries and synthesize counterfactual test oracles.`,
+          status: "COMPLETED",
+          current_step: "step_3",
+          summary: `Counterfactual oracle generated and verified in gVisor sandbox. All invariant contracts intact.`,
+          repo_id: repoId,
+          created_at: new Date(Date.now() - 3600000).toISOString(),
+        },
+        run_count: 1,
+      },
+    ];
+  }
+
+  // Pre-seed runs for each task
+  for (const item of taskList) {
+    const taskId = item.task.task_id;
+    const runId = `run_${taskId}_01`;
+    const initialRun: AgentRun = {
+      run_id: runId,
+      task_id: taskId,
+      status: item.task.status === "COMPLETED" ? "SUCCEEDED" : "RUNNING",
+      current_step: item.task.status === "COMPLETED" ? "Verify Blast Radius & Export Guardrails" : "AST Call Graph Traversal",
+      summary: item.task.summary,
+      seen_sha: repo.indexed_sha ?? "7d2b8e4f",
+      steps: [
+        {
+          n: 1,
+          tool: "graph_traverse",
+          args: { repo: repo.full_name, depth: 3 },
+          result_count: 6,
+          evidence_ids: ["ev1", "ev2"],
+          at: new Date(Date.now() - 1200000).toISOString(),
+        },
+        {
+          n: 2,
+          tool: "invariant_check",
+          args: { target: repo.name, contract: "INV-101" },
+          result_count: 1,
+          evidence_ids: ["ev3"],
+          at: new Date(Date.now() - 600000).toISOString(),
+        },
+      ],
+      source_refs: [repo.full_name, "PR #108"],
+      resume_count: 0,
+      started_at: new Date(Date.now() - 1800000).toISOString(),
+      updated_at: new Date(Date.now() - 300000).toISOString(),
+    };
+
+    _runsByTask[taskId] = [initialRun];
+    _runStates[runId] = {
+      run: initialRun,
+      task: item.task,
+      context: [
+        {
+          node_id: "ctx1",
+          kind: "decision",
+          title: `${repo.name.toUpperCase()} Architecture Contract`,
+          snippet: `Public interfaces and lifecycle hooks in ${repo.full_name} are protected by AST invariant rules.`,
+        },
+        {
+          node_id: "ctx2",
+          kind: "code",
+          title: `${repo.name} Entrypoint Definition`,
+          snippet: `// ${repo.full_name} (${repo.full_name.includes("spring") ? "src/main/java" : repo.full_name.includes("gin") ? "pkg/gin.go" : "src/index.ts"})\n// AST call graph validated by WhyCode Engine`,
+        },
+      ],
+      results: [
+        {
+          id: "ev1",
+          kind: "code",
+          title: "AST Call Graph Traversal",
+          snippet: `Verified 0 broken call paths across ${repo.counts?.entities ?? 250} code entities.`,
+        },
+        {
+          id: "ev2",
+          kind: "decision",
+          title: "Invariant Validation Result",
+          snippet: "Contract boundaries verified. Counterfactual test oracle confirmed valid.",
+        },
+      ],
+      validation: {
+        seen_sha: repo.indexed_sha ?? "7d2b8e4f",
+        indexed_sha: repo.indexed_sha ?? "7d2b8e4f",
+        moved: false,
+        source: "local-indexed-cache",
+      },
+    };
+  }
+
+  _tasksByRepo[repoId] = taskList;
+  return taskList;
+}
+
+export function getDemoTasks(repoId: string): Array<{ task: AgentTask; run_count: number }> {
+  return initRepoTasks(repoId);
+}
+
+export function getDemoTaskDetail(taskId: string): { task: AgentTask; runs: AgentRun[] } {
+  let foundTask: AgentTask | null = null;
+  for (const list of Object.values(_tasksByRepo)) {
+    const item = list.find((t) => t.task.task_id === taskId);
+    if (item) {
+      foundTask = item.task;
+      break;
+    }
+  }
+
+  if (!foundTask) {
+    foundTask = {
+      task_id: taskId,
+      title: "Inspect Codebase Invariants",
+      goal: "Analyze AST call graph, detect active invariants, and prepare agent handover context.",
+      status: "RUNNING",
+      current_step: "step_1",
+      summary: "Exploring codebase topology and invariant contracts.",
+      created_at: new Date().toISOString(),
+      repo_id: "repo_custom",
+    };
+  }
+
+  const runs = _runsByTask[taskId] ?? [];
+  if (runs.length === 0) {
+    const initialRun: AgentRun = {
+      run_id: `run_${taskId}_01`,
+      task_id: taskId,
+      status: "RUNNING",
+      current_step: "AST Call Graph Traversal",
+      summary: "Exploring codebase topology and invariant contracts.",
+      seen_sha: "7d2b8e4f",
+      steps: [
+        {
+          n: 1,
+          tool: "graph_traverse",
+          args: { depth: 2 },
+          result_count: 4,
+          evidence_ids: ["ev1"],
+          at: new Date().toISOString(),
+        },
+      ],
+      source_refs: [foundTask.title],
+      resume_count: 0,
+      started_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    runs.push(initialRun);
+    _runsByTask[taskId] = runs;
+    _runStates[initialRun.run_id] = {
+      run: initialRun,
+      task: foundTask,
+      context: [],
+      results: [],
+      validation: { seen_sha: "7d2b8e4f", indexed_sha: "7d2b8e4f", moved: false, source: "cache" },
+    };
+  }
+
+  return { task: foundTask, runs };
+}
+
+export function createDemoTask(repoId: string, title: string, goal: string): { task: AgentTask } {
+  const tasks = initRepoTasks(repoId);
+  const taskId = `task_${Math.random().toString(16).slice(2, 10)}`;
+  const task: AgentTask = {
+    task_id: taskId,
+    repo_id: repoId,
+    title,
+    goal,
+    status: "RUNNING",
+    current_step: "Ready to run",
+    summary: `Task created for ${repoId}. Ready for autonomous execution.`,
+    created_at: new Date().toISOString(),
+  };
+
+  tasks.unshift({ task, run_count: 0 });
+  _runsByTask[taskId] = [];
+  return { task };
+}
+
+export function createDemoRun(taskId: string): RunState {
+  const detail = getDemoTaskDetail(taskId);
+  const runId = `run_${Math.random().toString(16).slice(2, 10)}`;
+  const run: AgentRun = {
+    run_id: runId,
+    task_id: taskId,
+    status: "RUNNING",
+    current_step: "Step 1: AST Invariant Scan",
+    summary: "Scanning symbol dependencies and invariant constraints.",
+    seen_sha: "7d2b8e4f",
+    steps: [
+      {
+        n: 1,
+        tool: "invariant_scan",
+        args: { task_id: taskId },
+        result_count: 3,
+        evidence_ids: ["ev1"],
+        at: new Date().toISOString(),
+      },
+    ],
+    source_refs: [detail.task.title],
+    resume_count: 0,
+    started_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  const runs = _runsByTask[taskId] ?? [];
+  runs.unshift(run);
+  _runsByTask[taskId] = runs;
+
+  for (const list of Object.values(_tasksByRepo)) {
+    const item = list.find((t) => t.task.task_id === taskId);
+    if (item) {
+      item.run_count = runs.length;
+      break;
+    }
+  }
+
+  const state: RunState = {
+    run,
+    task: detail.task,
+    context: [
+      {
+        node_id: "ctx_1",
+        kind: "decision",
+        title: "Active Architectural Contract",
+        snippet: `Constraints for ${detail.task.title} loaded into agent working memory.`,
+      },
+    ],
+    results: [
+      {
+        id: "res_1",
+        kind: "code",
+        title: "AST Call Graph Traversal",
+        snippet: "Active symbol references isolated. Preparing invariant oracle verification.",
+      },
+    ],
+    validation: {
+      seen_sha: "7d2b8e4f",
+      indexed_sha: "7d2b8e4f",
+      moved: false,
+      source: "local-repo",
+    },
+  };
+
+  _runStates[runId] = state;
+  return state;
+}
+
+export function getDemoRun(runId: string): RunState {
+  if (_runStates[runId]) return _runStates[runId];
+
+  const syntheticRun: AgentRun = {
+    run_id: runId,
+    task_id: "task_auto",
     status: "SUCCEEDED",
     current_step: "Verify Blast Radius & Export Guardrails",
     summary: "Graph traversal complete. No regressions detected. Handover bundle verified.",
@@ -2190,26 +2665,102 @@ export const DEMO_RUNS: AgentRun[] = [
       {
         n: 1,
         tool: "graph_traverse",
-        args: { start_node: "src/flask/sessions.py", depth: 3 },
+        args: { depth: 3 },
         result_count: 6,
         evidence_ids: ["ev1", "ev2"],
-        at: new Date(Date.now() - 3400000).toISOString(),
+        at: new Date().toISOString(),
       },
       {
         n: 2,
         tool: "invariant_check",
-        args: { target: "TaggedJSONSerializer", rule: "INV-12" },
+        args: { rule: "INV-101" },
         result_count: 1,
         evidence_ids: ["ev3"],
-        at: new Date(Date.now() - 3200000).toISOString(),
+        at: new Date().toISOString(),
       },
     ],
-    source_refs: ["src/flask/sessions.py", "PR #5460"],
+    source_refs: ["Audit Invariants"],
     resume_count: 0,
-    started_at: new Date(Date.now() - 3600000).toISOString(),
-    updated_at: new Date(Date.now() - 3000000).toISOString(),
-  },
-];
+    started_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  const state: RunState = {
+    run: syntheticRun,
+    task: null,
+    context: [],
+    results: [],
+    validation: { seen_sha: "7d2b8e4f", indexed_sha: "7d2b8e4f", moved: false, source: "memory" },
+  };
+
+  _runStates[runId] = state;
+  return state;
+}
+
+export function stepDemoRun(
+  runId: string,
+  actionKind: "auto" | "step" | "interrupt" | "resume",
+  tool?: string,
+  args?: Record<string, unknown>,
+): RunState {
+  const state = getDemoRun(runId);
+  const now = new Date().toISOString();
+
+  if (actionKind === "interrupt") {
+    state.run.status = "INTERRUPTED";
+    state.run.updated_at = now;
+    return state;
+  }
+
+  if (actionKind === "resume") {
+    state.run.status = "RUNNING";
+    state.run.resume_count = (state.run.resume_count ?? 0) + 1;
+    state.run.updated_at = now;
+    return state;
+  }
+
+  const stepCount = (state.run.steps?.length ?? 0) + 1;
+  const toolName = tool || (stepCount === 2 ? "invariant_oracle_synth" : stepCount === 3 ? "dual_adapter_patch" : "blast_radius_sim");
+  const toolArgs = args || { step: stepCount, timestamp: now };
+
+  state.run.steps = [
+    ...(state.run.steps || []),
+    {
+      n: stepCount,
+      tool: toolName,
+      args: toolArgs,
+      result_count: 3,
+      evidence_ids: [`ev_${stepCount}`],
+      at: now,
+    },
+  ];
+
+  if (stepCount >= 3) {
+    state.run.status = "SUCCEEDED";
+    state.run.current_step = "Execution Complete · Zero Regressions";
+    state.run.summary = "All counterfactual test oracles passed. Dual-adapter patch verified in gVisor sandbox.";
+  } else {
+    state.run.status = "RUNNING";
+    state.run.current_step = `Step ${stepCount}: ${toolName}`;
+    state.run.summary = `Executing ${toolName} across repository AST nodes.`;
+  }
+
+  state.run.updated_at = now;
+  state.results = [
+    ...(state.results || []),
+    {
+      id: `ev_${stepCount}`,
+      kind: "finding",
+      title: `Step ${stepCount}: ${toolName} Output`,
+      snippet: `Execution completed successfully. AST call graph verified with zero regression risk.`,
+    },
+  ];
+
+  return state;
+}
+
+export const DEMO_TASKS: Array<{ task: AgentTask; run_count: number }> = getDemoTasks("repo_flask");
+export const DEMO_RUNS: AgentRun[] = _runsByTask["task_flask_session_audit"] ?? [];
 
 export const DEMO_AUDIT: AuditEvent[] = [
   {

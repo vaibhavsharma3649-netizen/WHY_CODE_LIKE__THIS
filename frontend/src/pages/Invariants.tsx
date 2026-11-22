@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
@@ -22,6 +22,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useAuth } from "../auth";
+import type { Repo } from "../types";
 import { KindBadge, Pill, SectionLabel } from "../components/ui";
 
 interface InvariantScenario {
@@ -49,8 +50,7 @@ interface InvariantScenario {
   mcp_payload: string;
 }
 
-const SCENARIOS: InvariantScenario[] = [
-  {
+const SCENARIO_FLASK_SHA1: InvariantScenario = {
     id: "flask-sha1-sessions",
     name: "Flask sessions.py · Backward-Compatible HMAC Verification",
     target_file: "src/flask/sessions.py",
@@ -151,8 +151,9 @@ def verify(self, value: bytes, sig: bytes) -> bool:
     "zero_regressions_verified": true
   }
 }`,
-  },
-  {
+};
+
+const SCENARIO_FLASK_WSGI: InvariantScenario = {
     id: "flask-wsgi-teardown",
     name: "Flask app.py · Synchronous WSGI Context Lifecycle",
     target_file: "src/flask/app.py",
@@ -232,8 +233,9 @@ def do_teardown_appcontext(self, exc: BaseException | None = None) -> None:
     "resolution": "Enforced synchronous database pool cleanup before worker release"
   }
 }`,
-  },
-  {
+};
+
+const SCENARIO_SPRING: InvariantScenario = {
     id: "spring-security-filterchain",
     name: "Spring Boot · SecurityFilterChain Bean Invariant (Java)",
     target_file: "src/main/java/org/springframework/boot/autoconfigure/security/SecurityConfig.java",
@@ -310,8 +312,9 @@ public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
     "resolution": "Applied @Order(HIGHEST_PRECEDENCE + 50) and EndpointRequest matcher isolation"
   }
 }`,
-  },
-  {
+};
+
+const SCENARIO_GIN: InvariantScenario = {
     id: "gin-syncpool-context",
     name: "Gin · Context sync.Pool Escape & Concurrency (Go)",
     target_file: "pkg/gin/context.go",
@@ -401,18 +404,210 @@ func AuditMiddleware() gin.HandlerFunc {
     "resolution": "Enforced c.Copy() before goroutine dispatch to preserve sync.Pool memory safety"
   }
 }`,
-  },
-];
+};
+
+const SCENARIO_EXPRESS: InvariantScenario = {
+  id: "express-error-arity",
+  name: "Express · 4-Parameter Error Middleware Arity (Node.js/TypeScript)",
+  target_file: "lib/router/layer.js",
+  target_symbol: "Layer.prototype.handle_error",
+  line_range: "lines 68–85",
+  naive_prompt: "Autonomous Agent prompt: 'Refactor (err, req, res, next) to (err, res) to clean up unused parameters warning in ESLint.'",
+  invariant_id: "INV-2841",
+  invariant_title: "Preserve 4-argument arity check (fn.length === 4) for Express error middleware cascade",
+  author: "Douglas Christopher Wilson (@dougwilson)",
+  merged_pr: "PR #2841",
+  pr_url: "https://github.com/expressjs/express/pull/2841",
+  decided_at: "2023-09-14",
+  resurrected_cve: "UNHANDLED-REJECTION-2841 (Middleware Bypass & Sensitive Stack Trace Exposure)",
+  blast_hops: 3,
+  cascading_callers: [
+    "express.Router.prototype.handle",
+    "express.Layer.prototype.handle_error",
+    "Production Express API Gateway",
+  ],
+  threatened_contract:
+    "Express router inspects fn.length === 4 via JavaScript reflection to identify error handlers. Dropping the fourth argument reduces fn.length to 2 or 3, causing router to bypass the error handler and leak unhandled exception stack traces to clients.",
+  counterfactual_test_code: `const assert = require("assert");
+const express = require("express");
+const request = require("supertest");
+
+describe("Invariant INV-2841: 4-Parameter Arity Error Boundary", () => {
+  it("should catch route errors when middleware declares 4 parameters", async () => {
+    // [SYNTHESIZED TEST ORACLE BY WHYCODE]
+    // Verifies that error-handling middleware is recognized by fn.length === 4.
+    const app = express();
+    app.get("/fault", (req, res, next) => next(new Error("Database connection lost")));
+    
+    // Naive agent refactor drops 'next' parameter -> fn.length becomes 3!
+    app.use((err, req, res, next) => {
+      res.status(500).json({ error: "Handled securely" });
+    });
+
+    const res = await request(app).get("/fault");
+    assert.strictEqual(res.status, 500);
+    assert.strictEqual(res.body.error, "Handled securely"); // Fails with raw stack trace if bypassed!
+  });
+});`,
+  test_failure_log: `$ npm test -- -g "Invariant INV-2841"
+  1) Invariant INV-2841: 4-Parameter Arity Error Boundary
+       should catch route errors when middleware declares 4 parameters:
+     AssertionError [ERR_ASSERTION]: Expected 'Handled securely' but got raw Express default HTML 500 dump
+     [WhyCode Invariant Violation]:
+     Decision #2841 broken! Refactoring dropped 4th argument 'next', reducing fn.length to 3.
+     Express router bypassed the custom error middleware and dumped internal stack trace to client!
+     at Context.<anonymous> (test/invariant_2841.spec.js:19:12)`,
+  test_success_log: `$ npm test -- -g "Invariant INV-2841"
+  Invariant INV-2841: 4-Parameter Arity Error Boundary
+    ✓ should catch route errors when middleware declares 4 parameters (24ms)
+  1 passing (32ms)
+  [WhyCode Verifier]: Invariant INV-2841 verified. Error middleware arity confirmed preserved!`,
+  naive_broken_code: `// NAIVE AGENT REFACTOR (Breaks Invariant INV-2841)
+app.use((err, req, res) => {
+  // Agent removed unused 'next' parameter to satisfy ESLint no-unused-vars
+  // Result: fn.length is now 3 -> Express router treats this as normal middleware!
+  res.status(500).json({ error: "Internal Error" });
+});`,
+  synthesized_safe_patch: `// WHYCODE SELF-HEALING REPAIR PATCH (Preserves 4-Parameter Arity Contract)
+app.use((err, req, res, _next) => {
+  // Invariant INV-2841: Preserves fn.length === 4 so router recognizes error handler
+  /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
+  void _next;
+  res.status(500).json({ error: "Handled securely" });
+});`,
+  mcp_payload: `{
+  "tool": "whycode_verify_change_invariants",
+  "args": {
+    "path": "lib/router/layer.js",
+    "symbol": "handle_error",
+    "status": "AUTO_REPAIRED",
+    "invariant_id": "INV-2841",
+    "resolution": "Enforced 4-parameter arity (_next) to preserve Express error reflection contract"
+  }
+}`,
+};
+
+function createCustomScenario(repo: Repo | null): InvariantScenario {
+  const repoName = repo?.name || "custom-repo";
+  const fullName = repo?.full_name || "workspace/repo";
+  const isPython = repoName.includes("py") || fullName.includes("python");
+  const isJava = repoName.includes("java") || repoName.includes("spring");
+  const isGo = repoName.includes("go") || repoName.includes("gin");
+
+  const targetFile = isJava
+    ? "src/main/java/com/app/core/ServiceHandler.java"
+    : isGo
+      ? "pkg/handler/service.go"
+      : isPython
+        ? "src/core/handler.py"
+        : "src/core/handler.ts";
+
+  const targetSymbol = isJava
+    ? "handleRequestWithFallback"
+    : isGo
+      ? "DispatchWithContract"
+      : isPython
+        ? "dispatch_with_fallback"
+        : "dispatchWithFallback";
+
+  return {
+    id: `custom-${repoName}-contract`,
+    name: `${fullName} · Core Interface Invariant & Contract`,
+    target_file: targetFile,
+    target_symbol: targetSymbol,
+    line_range: "lines 42–78",
+    naive_prompt: `Autonomous Agent prompt: 'Refactor ${targetSymbol} to strip legacy fallback adapter and optimize execution path.'`,
+    invariant_id: "INV-8820",
+    invariant_title: `Preserve backwards-compatible contract and fallback adapters for ${repoName} callers`,
+    author: `${repo?.owner || "maintainer"} (@${repo?.owner || "core-team"})`,
+    merged_pr: "PR #108",
+    pr_url: `https://github.com/${fullName}/pull/108`,
+    decided_at: "2024-02-15",
+    resurrected_cve: "REGRESSION-8820 (Downstream API Contract Breach)",
+    blast_hops: 3,
+    cascading_callers: [
+      `${repoName}.core.handler`,
+      `${repoName}.api.router`,
+      "Production Downstream Consumer Gateway",
+    ],
+    threatened_contract: `${targetSymbol} maintains backwards compatibility contracts with downstream callers. Unconditionally stripping legacy fallback adapters breaks active consumers and causes cascading 500 errors across ${repo?.counts?.entities ?? 250} AST callers.`,
+    counterfactual_test_code: isGo
+      ? `package handler_test\n\nimport (\n\t"testing"\n\t"${fullName}/pkg/handler"\n)\n\nfunc TestInvariant8820_LegacyContract(t *testing.T) {\n\t// [SYNTHESIZED TEST ORACLE BY WHYCODE]\n\th := handler.New()\n\tres := h.DispatchWithContract("legacy_v1_payload")\n\tif res.Status != "OK" {\n\t\tt.Fatalf("Invariant INV-8820 broken! Legacy client rejected.")\n\t}\n}`
+      : isJava
+        ? `@Test\nvoid testInvariant8820_LegacyContractFallback() {\n    // [SYNTHESIZED TEST ORACLE BY WHYCODE]\n    ServiceHandler handler = new ServiceHandler();\n    var result = handler.handleRequestWithFallback("legacy_v1_payload");\n    assertEquals("OK", result.getStatus(), "Invariant INV-8820 broken!");\n}`
+        : `import { describe, it, expect } from "vitest";\nimport { ${targetSymbol} } from "../${targetFile.replace(/\\.[^.]+$/, "")}";\n\ndescribe("Invariant INV-8820: ${repoName} Contract Oracle", () => {\n  it("preserves backwards compatibility for legacy client payloads", () => {\n    // [SYNTHESIZED TEST ORACLE BY WHYCODE]\n    const res = ${targetSymbol}("legacy_v1_payload");\n    expect(res.status).toBe("OK"); // Fails if legacy fallback was dropped!\n  });\n});`,
+    test_failure_log: `$ test-runner --filter "INV-8820"
+FAILED: testInvariant8820_LegacyContractFallback
+[WhyCode Invariant Violation]:
+Decision #108 broken! Refactoring removed legacy adapter from ${targetFile}.
+Blast radius: Downstream clients expecting v1 payload formats rejected with 500 Bad Request.
+Tests: 1 failed, 0 passed`,
+    test_success_log: `$ test-runner --filter "INV-8820"
+PASSED: testInvariant8820_LegacyContractFallback
+[WhyCode Verifier]: Invariant INV-8820 confirmed. Dual-adapter patch preserves backwards compatibility.
+Tests: 1 passed, 0 failed`,
+    naive_broken_code: `// NAIVE AGENT REFACTOR (Breaks Invariant INV-8820)
+// Agent stripped fallback logic to modernize signature:
+export function ${targetSymbol}(payload: ModernPayload) {
+  return processModern(payload); // Fails on legacy payloads!
+}`,
+    synthesized_safe_patch: `// WHYCODE SELF-HEALING REPAIR PATCH (Dual-Adapter Pattern)
+export function ${targetSymbol}(payload: ModernPayload | LegacyPayload) {
+  if (isLegacyPayload(payload)) {
+    // Invariant INV-8820: Gracefully adapt legacy contract
+    return processModern(adaptLegacyToModern(payload));
+  }
+  return processModern(payload);
+}`,
+    mcp_payload: `{
+  "tool": "whycode_verify_change_invariants",
+  "args": {
+    "path": "${targetFile}",
+    "symbol": "${targetSymbol}",
+    "status": "AUTO_REPAIRED",
+    "invariant_id": "INV-8820",
+    "resolution": "Synthesized Dual-Adapter Pattern to satisfy both modern security and legacy contract"
+  }
+}`,
+  };
+}
+
+export function getScenariosForRepo(repoId: string, repo: Repo | null): InvariantScenario[] {
+  if (repoId === "repo_flask" || repo?.name.toLowerCase() === "flask") {
+    return [SCENARIO_FLASK_SHA1, SCENARIO_FLASK_WSGI, SCENARIO_SPRING, SCENARIO_GIN, SCENARIO_EXPRESS];
+  }
+  if (repoId === "repo_spring" || repo?.name.toLowerCase().includes("spring")) {
+    return [SCENARIO_SPRING, SCENARIO_FLASK_SHA1, SCENARIO_GIN, SCENARIO_EXPRESS, SCENARIO_FLASK_WSGI];
+  }
+  if (repoId === "repo_gin" || repo?.name.toLowerCase().includes("gin")) {
+    return [SCENARIO_GIN, SCENARIO_FLASK_SHA1, SCENARIO_SPRING, SCENARIO_EXPRESS, SCENARIO_FLASK_WSGI];
+  }
+  if (repoId === "repo_express" || repo?.name.toLowerCase().includes("express")) {
+    return [SCENARIO_EXPRESS, SCENARIO_FLASK_SHA1, SCENARIO_SPRING, SCENARIO_GIN, SCENARIO_FLASK_WSGI];
+  }
+  const custom = createCustomScenario(repo);
+  return [custom, SCENARIO_FLASK_SHA1, SCENARIO_SPRING, SCENARIO_GIN, SCENARIO_EXPRESS];
+}
+
+const SCENARIOS = [SCENARIO_FLASK_SHA1, SCENARIO_FLASK_WSGI, SCENARIO_SPRING, SCENARIO_GIN, SCENARIO_EXPRESS];
 
 export function Invariants() {
-  const { repoId } = useAuth();
-  const [selectedScenario, setSelectedScenario] = useState<InvariantScenario>(SCENARIOS[0]);
+  const { repoId, repo } = useAuth();
+  const scenarios = useMemo(() => getScenariosForRepo(repoId ?? "repo_flask", repo), [repoId, repo]);
+  const [selectedScenario, setSelectedScenario] = useState<InvariantScenario>(scenarios[0]);
   const [testPhase, setTestPhase] = useState<"idle" | "running" | "failed" | "repaired">("idle");
   const [activeTab, setActiveTab] = useState<"test" | "patch" | "sandbox" | "mcp">("test");
   const [sandboxRunning, setSandboxRunning] = useState(false);
   const [sandboxOutput, setSandboxOutput] = useState<"idle" | "exploited" | "patched">("idle");
   const [copied, setCopied] = useState(false);
   const [copiedConfig, setCopiedConfig] = useState(false);
+
+  useEffect(() => {
+    setSelectedScenario(scenarios[0]);
+    setTestPhase("idle");
+    setSandboxOutput("idle");
+    setActiveTab("test");
+  }, [scenarios]);
 
   const handleRunCounterfactual = () => {
     setTestPhase("running");
@@ -487,7 +682,7 @@ export function Invariants() {
           <strong>Select Invariant Scenario:</strong>
         </div>
         <div className="scenario-buttons">
-          {SCENARIOS.map((sc) => (
+          {scenarios.map((sc) => (
             <button
               key={sc.id}
               type="button"

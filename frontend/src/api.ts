@@ -39,13 +39,19 @@ import {
   DEMO_TIMELINE,
   DEMO_USER_STAFF,
   addCustomRepo,
+  createDemoRun,
+  createDemoTask,
   getDemoDecisions,
   getDemoFindings,
   getDemoGraph,
   getDemoHandover,
   getDemoOverview,
+  getDemoRun,
+  getDemoTaskDetail,
+  getDemoTasks,
   getDemoTimeline,
   localAiInference,
+  stepDemoRun,
 } from "./mockData";
 
 const rawApi = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
@@ -133,9 +139,22 @@ function refreshTokens(): Promise<boolean> {
   return refreshInFlight;
 }
 
-function mockFallback<T>(path: string): T {
+function mockFallback<T>(path: string, init?: RequestInit): T {
+  let parsedBody: Record<string, any> = {};
+  if (init?.body && typeof init.body === "string") {
+    try {
+      parsedBody = JSON.parse(init.body);
+    } catch {
+      /* ignore */
+    }
+  }
+
   const repoMatch = path.match(/\/repos\/([^/]+)/);
-  const activeRepo = repoMatch ? decodeURIComponent(repoMatch[1]) : (session.repo() ?? "repo_flask");
+  const repoParamMatch = path.match(/[?&]repo_id=([^&]+)/);
+  const activeRepo =
+    repoMatch ? decodeURIComponent(repoMatch[1])
+    : repoParamMatch ? decodeURIComponent(repoParamMatch[1])
+    : parsedBody.repo_id || (session.repo() ?? "repo_flask");
 
   if (path === "/auth/config") return DEMO_CONFIG as unknown as T;
   if (path === "/auth/login") {
@@ -163,12 +182,65 @@ function mockFallback<T>(path: string): T {
   if (path.includes("/findings")) return { findings: getDemoFindings(activeRepo) } as unknown as T;
   if (path.includes("/handover")) return getDemoHandover(activeRepo) as unknown as T;
   if (path.includes("/graph")) return getDemoGraph(activeRepo) as unknown as T;
-  if (path.includes("/agent/tasks")) return { tasks: DEMO_TASKS } as unknown as T;
+
+  // Agent task runs creation (POST /agent/tasks/:taskId/runs)
+  const taskRunCreateMatch = path.match(/\/agent\/tasks\/([^/]+)\/runs/);
+  if (taskRunCreateMatch) {
+    const taskId = decodeURIComponent(taskRunCreateMatch[1]);
+    return createDemoRun(taskId) as unknown as T;
+  }
+
+  // Agent task detail (GET /agent/tasks/:taskId)
+  const taskDetailMatch = path.match(/\/agent\/tasks\/([^/?]+)$/);
+  if (taskDetailMatch) {
+    const taskId = decodeURIComponent(taskDetailMatch[1]);
+    return getDemoTaskDetail(taskId) as unknown as T;
+  }
+
+  // Agent task create (POST /agent/tasks) or list (GET /agent/tasks)
+  if (path === "/agent/tasks" || path.startsWith("/agent/tasks?")) {
+    if (init?.method === "POST") {
+      return createDemoTask(
+        parsedBody.repo_id || activeRepo,
+        parsedBody.title || "Audit Invariants",
+        parsedBody.goal || "Analyze codebase",
+      ) as unknown as T;
+    }
+    return { tasks: getDemoTasks(activeRepo) } as unknown as T;
+  }
+
+  // Agent run actions: auto, interrupt, resume, step, or get run state
+  if (path.includes("/agent/runs/")) {
+    if (path.endsWith("/auto")) {
+      const runId = path.split("/")[3];
+      return stepDemoRun(runId, "auto") as unknown as T;
+    }
+    if (path.endsWith("/interrupt")) {
+      const runId = path.split("/")[3];
+      return stepDemoRun(runId, "interrupt") as unknown as T;
+    }
+    if (path.endsWith("/resume")) {
+      const runId = path.split("/")[3];
+      return stepDemoRun(runId, "resume") as unknown as T;
+    }
+    if (path.endsWith("/step")) {
+      const runId = path.split("/")[3];
+      return stepDemoRun(runId, "step", parsedBody.tool, parsedBody.args) as unknown as T;
+    }
+    const runIdMatch = path.match(/\/agent\/runs\/([^/?]+)$/);
+    if (runIdMatch) {
+      return getDemoRun(runIdMatch[1]) as unknown as T;
+    }
+  }
+
   if (path.includes("/org/audit")) return { events: DEMO_AUDIT } as unknown as T;
   if (path.includes("/admin/users")) return { users: DEMO_ADMIN_USERS } as unknown as T;
   if (path.includes("/admin/repos")) return { repos: DEMO_ADMIN_REPOS } as unknown as T;
   if (path === "/ask") {
-    return localAiInference("Explain the core architectural invariants", activeRepo) as unknown as T;
+    return localAiInference(
+      parsedBody.question || "Explain the core architectural invariants",
+      parsedBody.repo_id || activeRepo,
+    ) as unknown as T;
   }
   throw new ApiError(`Fallback unavailable for ${path}`, 503);
 }
@@ -181,7 +253,7 @@ async function request<T>(path: string, init?: RequestInit, allowRefresh = true)
     });
     if (response.status === 503) {
       console.warn(`[WhyCode] Backend 503 on ${path}. Serving demo fallback.`);
-      return mockFallback<T>(path);
+      return mockFallback<T>(path, init);
     }
     if (response.status === 401 && allowRefresh && !path.startsWith("/auth/")) {
       if (await refreshTokens()) return request<T>(path, init, false);
@@ -200,7 +272,7 @@ async function request<T>(path: string, init?: RequestInit, allowRefresh = true)
   } catch (err) {
     console.warn(`[WhyCode] Network request to ${path} failed (${err}). Serving offline demo mock.`);
     try {
-      return mockFallback<T>(path);
+      return mockFallback<T>(path, init);
     } catch {
       throw err;
     }
@@ -384,8 +456,8 @@ export async function askStream(
     console.warn("[WhyCode] askStream local fine-tuned AI inference fallback activated:", err);
     const activeRepo = repoId ?? session.repo() ?? "repo_flask";
     const sample = localAiInference(question, activeRepo);
-    handlers.onMeta?.({ indexed_sha: "7d2b8e4f", repo: activeRepo });
-    handlers.onEvidence?.({ evidence: sample.evidence, mode: "auto", timing_ms: 36 });
+    handlers.onMeta?.({ indexed_sha: sample.indexed_sha ?? "7d2b8e4f", repo: activeRepo });
+    handlers.onEvidence?.({ evidence: sample.citations, mode: "auto", timing_ms: 32 });
     const words = sample.answer.split(" ");
     for (const w of words) {
       if (signal?.aborted) break;

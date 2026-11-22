@@ -13,7 +13,7 @@ import {
   User,
 } from "lucide-react";
 import { askStream } from "../api";
-import type { AskResult, AskTurn, Citation, Role } from "../types";
+import type { AskResult, AskTurn, Citation, Repo, Role } from "../types";
 import { useAuth } from "../auth";
 import { errorText } from "../hooks";
 import { MODE_LABEL } from "../nav";
@@ -56,36 +56,136 @@ function groundingTone(verdict?: string): string {
   return "neutral";
 }
 
-function suggestionsForRole(role: Role | null): Array<{ text: string; note: string }> {
+function suggestionsForRole(role: Role | null, repo: Repo | null): Array<{ text: string; note: string }> {
+  const repoName = repo?.name?.toLowerCase() || "";
+  const isSpring = repoName.includes("spring");
+  const isGin = repoName.includes("gin");
+  const isExpress = repoName.includes("express");
+  const isFlask = repoName === "flask" || (!isSpring && !isGin && !isExpress && repo?.repo_id === "repo_flask");
+  const rName = repo?.name || "this repository";
+
+  if (isSpring) {
+    if (role === "security_reviewer") {
+      return [
+        { text: "Why does SecurityFilterChain require explicit @Order precedence for Actuator?", note: "Security" },
+        { text: "Which Spring Security findings are linked to CVE-2023-34035?", note: "CVE" },
+        { text: "What code is affected by the highest-severity finding?", note: "Code" },
+        { text: "What should I check before modifying SecurityConfig.java?", note: "Follow-up" },
+      ];
+    }
+    if (role === "developer") {
+      return [
+        { text: "Where is @ConditionalOnMissingBean used in AutoConfiguration?", note: "Understand" },
+        { text: "Why does SecurityFilterChain require explicit @Order precedence?", note: "Why" },
+        { text: "How does the request filter chain flow through this code?", note: "Trace" },
+        { text: "What tests or callers touch the security configuration?", note: "Change" },
+      ];
+    }
+    return [
+      { text: "Where is @ConditionalOnMissingBean used in AutoConfiguration?", note: "Understand" },
+      { text: "Why does SecurityFilterChain require explicit bean precedence?", note: "Why" },
+      { text: "Which decisions affect the starter autoconfigurations?", note: "Decisions" },
+      { text: "What should a new maintainer know before changing this?", note: "Handover" },
+    ];
+  }
+
+  if (isGin) {
+    if (role === "security_reviewer") {
+      return [
+        { text: "Why is c.Copy() required when passing *gin.Context to goroutines?", note: "Security" },
+        { text: "Where could sync.Pool recycling cause a data race or use-after-free?", note: "Race" },
+        { text: "What code is affected by the highest-severity finding?", note: "Code" },
+        { text: "What should I check before changing context dispatch in gin.go?", note: "Follow-up" },
+      ];
+    }
+    if (role === "developer") {
+      return [
+        { text: "Where is the sync.Pool allocation pattern implemented in Gin?", note: "Understand" },
+        { text: "Why is c.Copy() required when passing *gin.Context to goroutines?", note: "Why" },
+        { text: "How does Engine.handleHTTPRequest dispatch middleware chains?", note: "Trace" },
+        { text: "What callers touch Context.reset() upon request completion?", note: "Change" },
+      ];
+    }
+    return [
+      { text: "Where is the sync.Pool allocation pattern implemented in Gin?", note: "Understand" },
+      { text: "Why is c.Copy() required when passing Context to goroutines?", note: "Why" },
+      { text: "Which decisions affect the Gin Engine middleware order?", note: "Decisions" },
+      { text: "What should a new maintainer know before modifying pkg/gin.go?", note: "Handover" },
+    ];
+  }
+
+  if (isExpress) {
+    if (role === "security_reviewer") {
+      return [
+        { text: "Why must error handling middleware declare exactly 4 arguments in Express?", note: "Security" },
+        { text: "Which router error boundaries prevent unhandled exception leakage?", note: "Boundary" },
+        { text: "What code is affected by the highest-severity finding?", note: "Code" },
+        { text: "What should I check before refactoring Layer.prototype.handle_error?", note: "Follow-up" },
+      ];
+    }
+    if (role === "developer") {
+      return [
+        { text: "Where is Layer.prototype.handle_error defined in Express?", note: "Understand" },
+        { text: "Why must error handling middleware take exactly 4 parameters (fn.length === 4)?", note: "Why" },
+        { text: "How does the router layer dispatch next() error propagation?", note: "Trace" },
+        { text: "What callers or tests touch the router layer handle method?", note: "Change" },
+      ];
+    }
+    return [
+      { text: "Where is Layer.prototype.handle_error defined in Express?", note: "Understand" },
+      { text: "Why must error handling middleware take exactly 4 parameters?", note: "Why" },
+      { text: "Which decisions affect the Express Router Layer cascade?", note: "Decisions" },
+      { text: "What should a new maintainer know before changing lib/router?", note: "Handover" },
+    ];
+  }
+
+  if (isFlask) {
+    if (role === "security_reviewer") {
+      return [
+        { text: "Which security findings are linked to a recorded rationale?", note: "Security" },
+        { text: "Why is hashlib.sha1 still used in sessions.py?", note: "Why" },
+        { text: "What code is affected by the highest-severity finding?", note: "Code" },
+        { text: "What should I check before changing the affected file?", note: "Follow-up" },
+      ];
+    }
+    if (role === "developer") {
+      return [
+        { text: "Where is the WSGI application object defined?", note: "Understand" },
+        { text: "How does the request context flow through this code?", note: "Trace" },
+        { text: "Why is hashlib.sha1 still used in sessions.py?", note: "Why" },
+        { text: "What tests or callers touch this code?", note: "Change" },
+      ];
+    }
+    return [
+      { text: "Where is the WSGI application object defined?", note: "Understand" },
+      { text: "Why is hashlib.sha1 still used in sessions.py?", note: "Why" },
+      { text: "What security issues are linked to a known rationale?", note: "Security" },
+      { text: "Why was the payment retry limit set to three attempts?", note: "Abstain" },
+    ];
+  }
+
+  // Any custom imported repo
   if (role === "security_reviewer") {
     return [
-      { text: "Which security findings are linked to a recorded rationale?", note: "Security" },
-      { text: "Why is hashlib.sha1 still used in sessions.py?", note: "Why" },
-      { text: "What code is affected by the highest-severity finding?", note: "Code" },
-      { text: "What should I check before changing the affected file?", note: "Follow-up" },
+      { text: `What security boundaries and invariants protect ${rName}?`, note: "Security" },
+      { text: `Which files in ${rName} have the highest blast radius if changed?`, note: "Blast Radius" },
+      { text: "What code is affected by recorded security findings?", note: "Code" },
+      { text: `What should I verify before deploying changes to ${rName}?`, note: "Follow-up" },
     ];
   }
   if (role === "developer") {
     return [
-      { text: "Where is the WSGI application object defined?", note: "Understand" },
-      { text: "How does the request context flow through this code?", note: "Trace" },
-      { text: "Why is hashlib.sha1 still used in sessions.py?", note: "Why" },
-      { text: "What tests or callers touch this code?", note: "Change" },
-    ];
-  }
-  if (role === "maintainer") {
-    return [
-      { text: "What changed recently and why?", note: "History" },
-      { text: "Which decisions affect the session code?", note: "Decisions" },
-      { text: "What should a new maintainer know before changing this?", note: "Handover" },
-      { text: "Which security findings have linked rationale?", note: "Security" },
+      { text: `Where is the primary entrypoint and dispatch loop in ${rName}?`, note: "Understand" },
+      { text: `What are the core architectural invariants in ${rName}?`, note: "Why" },
+      { text: `How does request / data flow through ${rName}?`, note: "Trace" },
+      { text: `What callers or test oracles protect core interfaces in ${rName}?`, note: "Change" },
     ];
   }
   return [
-    { text: "Where is the WSGI application object defined?", note: "Understand" },
-    { text: "Why is hashlib.sha1 still used in sessions.py?", note: "Why" },
-    { text: "What security issues are linked to a known rationale?", note: "Security" },
-    { text: "Why was the payment retry limit set to three attempts?", note: "Abstain" },
+    { text: `What are the core architectural invariants in ${rName}?`, note: "Understand" },
+    { text: `Which decisions explain the current architecture of ${rName}?`, note: "Why" },
+    { text: `What should a new engineer know before refactoring ${rName}?`, note: "Handover" },
+    { text: `What is the blast radius of modifying core interfaces in ${rName}?`, note: "Blast Radius" },
   ];
 }
 
@@ -358,7 +458,7 @@ export function Ask() {
 
   const busy = phase === "retrieving" || phase === "streaming";
   const confidence = result?.confidence;
-  const suggestions = suggestionsForRole(role);
+  const suggestions = suggestionsForRole(role, repo);
   const followUps = followUpsFor(selectedCitation ?? evidence[0] ?? null, role);
   const hasConversation = turns.length > 0 || phase !== "idle";
 
