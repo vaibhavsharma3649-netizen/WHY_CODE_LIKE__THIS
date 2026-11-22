@@ -42,6 +42,7 @@ import {
   getDemoDecisions,
   getDemoFindings,
   getDemoGraph,
+  getDemoHandover,
   getDemoOverview,
   getDemoTimeline,
   localAiInference,
@@ -160,7 +161,7 @@ function mockFallback<T>(path: string): T {
   if (path.includes("/timeline")) return { items: getDemoTimeline(activeRepo) } as unknown as T;
   if (path.includes("/decisions")) return { decisions: getDemoDecisions(activeRepo) } as unknown as T;
   if (path.includes("/findings")) return { findings: getDemoFindings(activeRepo) } as unknown as T;
-  if (path.includes("/handover")) return DEMO_HANDOVER as unknown as T;
+  if (path.includes("/handover")) return getDemoHandover(activeRepo) as unknown as T;
   if (path.includes("/graph")) return getDemoGraph(activeRepo) as unknown as T;
   if (path.includes("/agent/tasks")) return { tasks: DEMO_TASKS } as unknown as T;
   if (path.includes("/org/audit")) return { events: DEMO_AUDIT } as unknown as T;

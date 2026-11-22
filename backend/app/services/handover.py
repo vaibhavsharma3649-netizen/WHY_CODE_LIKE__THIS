@@ -7,7 +7,11 @@ from typing import Any
 from .. import db
 from ..retrieval import findings_for_repo, repo_overview
 
-ENTRY_NAMES = ["Flask", "Blueprint", "cli", "run", "make_response", "FlaskGroup", "create_app"]
+ENTRY_NAMES = [
+    "Flask", "Blueprint", "cli", "run", "make_response", "FlaskGroup", "create_app", "app",
+    "Application", "SpringBootApplication", "SecurityConfig", "filterChain", "AutoConfiguration",
+    "ServeHTTP", "Engine", "Context", "main", "listen", "Router", "handler", "main_engine"
+]
 
 
 def _source(title: str, url: str | None = None, path: str | None = None, line: int | None = None) -> dict[str, Any]:

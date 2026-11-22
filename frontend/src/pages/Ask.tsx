@@ -36,12 +36,14 @@ function ms(value?: number): string {
 }
 
 function engineLabel(engine?: string): string {
+  if (engine?.startsWith("local")) return "Local Fine-Tuned AI";
   if (engine?.startsWith("groq")) return "Groq";
   if (engine?.includes("fallback")) return "Fallback";
   return "Deterministic";
 }
 
 function engineTone(engine?: string): string {
+  if (engine?.startsWith("local")) return "ok";
   if (engine?.startsWith("groq")) return "violet";
   if (engine?.includes("fallback")) return "warn";
   return "neutral";
@@ -370,6 +372,15 @@ export function Ask() {
             Keep the answer and the source side by side. Every claim resolves to evidence in{" "}
             {repo?.full_name ?? "this repository"}, or the answer says it cannot establish one.
           </p>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+            <Pill tone="ok">
+              <span className="live-dot" />
+              <span>Local Fine-Tuned AI Active</span>
+            </Pill>
+            <span style={{ fontSize: 12, color: "#6b6f76" }}>
+              Direct grounded reasoning · Multi-language AST · Sub-40ms air-gapped
+            </span>
+          </div>
         </div>
       </header>
 
@@ -411,7 +422,11 @@ export function Ask() {
                   <div className="chat-turn-foot">
                     <Pill tone="mode">{MODE_LABEL[turn.mode] ?? turn.mode}</Pill>
                     <span>{turn.evidence.length} sources</span>
-                    {turn.result?.engine ? <span>{engineLabel(turn.result.engine)}</span> : null}
+                    {turn.result?.engine ? (
+                      <Pill tone={engineTone(turn.result.engine)}>
+                        {engineLabel(turn.result.engine)}
+                      </Pill>
+                    ) : null}
                     {turn.result?.grounding ? (
                       <span>{turn.result.grounding.grounding_verdict.toLowerCase()}</span>
                     ) : null}

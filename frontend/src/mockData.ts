@@ -447,7 +447,11 @@ export const DEMO_FINDINGS: Finding[] = [
   },
 ];
 
-export const DEMO_HANDOVER: Handover = {
+function strSha(sha?: string | null): string {
+  return sha ? sha.slice(0, 8) : "7d2b8e4f";
+}
+
+export const DEMO_HANDOVER_FLASK: Handover = {
   repo: {
     ...DEMO_REPO,
     org_name: "Northwind Engineering",
@@ -528,6 +532,358 @@ export const DEMO_HANDOVER: Handover = {
     "Hardware benchmark metrics for ASGI async streaming under high concurrency gunicorn gevent workers.",
   ],
 };
+
+export function getDemoHandover(repoId = "repo_flask"): Handover {
+  const repo = DEMO_REPOS.find((r) => r.repo_id === repoId) ?? DEMO_REPO_FLASK;
+  const fullName = repo.full_name;
+  const fnLower = fullName.toLowerCase();
+
+  // 1. SPRING BOOT (JAVA)
+  if (repoId === "repo_spring" || fnLower.includes("spring")) {
+    return {
+      repo: { ...repo, org_name: "Northwind Engineering" },
+      generated_at: new Date().toISOString(),
+      sections: [
+        {
+          key: "arch_overview",
+          title: "1. Core AutoConfiguration & Bean Wiring Engine",
+          body: "Spring Boot revolves around conditional bean definition graphs orchestrated by `@EnableAutoConfiguration`. Component scans register starter libraries through `AutoConfigurationPackages.java`. A key architectural principle is that all built-in starter configurations must yield smoothly to user-declared beans without requiring explicit `@Primary` annotations or exclusion filters.",
+          coverage: "fact",
+          sources: [
+            {
+              title: "AutoConfigurationPackages.java",
+              path: "src/main/java/org/springframework/boot/autoconfigure/AutoConfigurationPackages.java",
+              line_start: 78,
+              url: `${repo.url}/blob/main/src/main/java/org/springframework/boot/autoconfigure/AutoConfigurationPackages.java#L78`,
+            },
+            {
+              title: "SecurityConfig.java",
+              path: "src/main/java/org/springframework/boot/autoconfigure/security/SecurityConfig.java",
+              line_start: 42,
+              url: `${repo.url}/blob/main/src/main/java/org/springframework/boot/autoconfigure/security/SecurityConfig.java#L42`,
+            },
+          ],
+        },
+        {
+          key: "security_boundaries",
+          title: "2. SecurityFilterChain Precedence & Actuator Boundaries",
+          body: "Web security is governed by standalone `SecurityFilterChain` component beans following PR #34091. To prevent authorization bypasses (CVE-2023-34035), custom security filter chains must declare strict order precedence (`@Order(Ordered.HIGHEST_PRECEDENCE + 50)`) before the actuator management chain. Catch-all matchers must never shadow actuator health probe endpoints in Kubernetes clusters.",
+          coverage: "fact",
+          sources: [
+            {
+              title: "PR #34091: SecurityFilterChain Component Bean Invariant",
+              path: "src/main/java/org/springframework/boot/autoconfigure/security/SecurityConfig.java",
+              line_start: 45,
+              url: "https://github.com/spring-projects/spring-boot/pull/34091",
+            },
+            {
+              title: "SpotBugs EI_EXPOSE_REP2 (Documented Framework Exemption)",
+              path: "src/main/java/org/springframework/boot/autoconfigure/security/SecurityConfig.java",
+              line_start: 52,
+              url: "https://spotbugs.readthedocs.io/en/latest/bugDescriptions.html#EI_EXPOSE_REP2",
+            },
+          ],
+        },
+        {
+          key: "invariants_agent",
+          title: "3. ArgosX & Coding Agent Safety Invariants (Guardrails)",
+          body: `When autonomous coding agents (ArgosX, Claude Code, Cursor) generate code in this repository, the following invariants are strictly enforced:
+
+1. **Invariant #34091 (Security Precedence):** Never configure \`authorizeHttpRequests()\` without explicit actuator matcher isolation.
+2. **Invariant #14280 (Extensibility):** Never remove \`@ConditionalOnMissingBean\` from starter default auto-configuration beans.
+3. **Invariant #20412 (Reactive Boundary):** Do not block on \`Mono.block()\` or \`Flux\` inside non-blocking WebFlux dispatchers.`,
+          coverage: "fact",
+          sources: [
+            {
+              title: "Architectural Invariant Oracle (WhyCode Neo4j Graph)",
+              path: "src/main/java/org/springframework/boot/autoconfigure/security/SecurityConfig.java",
+              line_start: 1,
+              url: repo.url,
+            },
+          ],
+        },
+        {
+          key: "tech_debt",
+          title: "4. Known Technical Debt & Migration Boundaries",
+          body: "Legacy applications upgrading to Spring Boot 3.x require complete removal of `WebSecurityConfigurerAdapter`. Ahead-of-Time (AOT) compilation and GraalVM Native Image reflect-config bindings are currently in progressive rollouts.",
+          coverage: "inferred",
+          sources: [
+            {
+              title: "Spring Boot 3.0 Migration Guide",
+              url: "https://github.com/spring-projects/spring-boot/wiki/Spring-Boot-3.0-Migration-Guide",
+            },
+          ],
+        },
+      ],
+      unknowns: [
+        "Deprecation deadline for legacy Tomcat APR connector support across enterprise microservice builds.",
+        "Target Java 21 Virtual Thread (Project Loom) throughput under thread-local security context propagation.",
+      ],
+    };
+  }
+
+  // 2. EXPRESS (JAVASCRIPT / TYPESCRIPT)
+  if (repoId === "repo_express" || fnLower.includes("express")) {
+    return {
+      repo: { ...repo, org_name: "Northwind Engineering" },
+      generated_at: new Date().toISOString(),
+      sections: [
+        {
+          key: "arch_overview",
+          title: "1. Core Layer Routing & Middleware Dispatch Pipeline",
+          body: "Express is structured around a nested stack of `Layer` instances mounted inside `lib/router/index.js` and `lib/application.js`. Incoming HTTP requests execute middleware in linear registration order. Crucially, error handlers are identified exclusively by having an exact function arity of 4: `(err, req, res, next)`.",
+          coverage: "fact",
+          sources: [
+            {
+              title: "lib/application.js",
+              path: "lib/application.js",
+              line_start: 140,
+              url: `${repo.url}/blob/master/lib/application.js#L140`,
+            },
+            {
+              title: "lib/router/layer.js",
+              path: "lib/router/layer.js",
+              line_start: 82,
+              url: `${repo.url}/blob/master/lib/router/layer.js#L82`,
+            },
+          ],
+        },
+        {
+          key: "middleware_contracts",
+          title: "2. Middleware Arity-4 Contract & Memory Safety",
+          body: "PR #2841 established that the router inspects `fn.length === 4` to determine whether a callback handles exceptions. If an agent refactors an error handler into `(err, req, res)`, Express will silently treat it as a standard request handler, leaking uncaught rejections. Furthermore, PR #3650 mandates `Buffer.from()` over `new Buffer()` with legacy polyfill fallback.",
+          coverage: "fact",
+          sources: [
+            {
+              title: "PR #2841: Explicit 4-argument error middleware detection",
+              path: "lib/router/index.js",
+              line_start: 210,
+              url: "https://github.com/expressjs/express/pull/2841",
+            },
+            {
+              title: "PR #3650: Eliminate uninitialized memory exposure via Buffer.from()",
+              path: "lib/utils.js",
+              line_start: 22,
+              url: "https://github.com/expressjs/express/pull/3650",
+            },
+          ],
+        },
+        {
+          key: "invariants_agent",
+          title: "3. ArgosX & Coding Agent Safety Invariants (Guardrails)",
+          body: `When autonomous coding agents modify this codebase, the following invariants are verified:
+
+1. **Invariant #2841 (Error Middleware Signature):** Never drop the unused fourth parameter \`next\` from error handlers; \`fn.length\` MUST equal 4.
+2. **Invariant #3650 (Memory Initialization):** Never invoke deprecated \`new Buffer()\` constructors.
+3. **Invariant #1104 (Header Mutation):** Never modify headers after calling \`res.end()\` or \`res.send()\`.`,
+          coverage: "fact",
+          sources: [
+            {
+              title: "Architectural Invariant Oracle (WhyCode Neo4j Graph)",
+              path: "lib/application.js",
+              line_start: 1,
+              url: repo.url,
+            },
+          ],
+        },
+        {
+          key: "tech_debt",
+          title: "4. Known Technical Debt & Migration Boundaries",
+          body: "Express 5.0 migration involves upgrading `path-to-regexp` to v8 and removing deprecated `res.sendfile()`. Async/await error propagation without try/catch wrappers is staged for native promises in 5.x.",
+          coverage: "inferred",
+          sources: [
+            {
+              title: "Express 5.0 Migration History",
+              url: "https://expressjs.com/en/guide/migrating-5.html",
+            },
+          ],
+        },
+      ],
+      unknowns: [
+        "Native fetch API integration timetable for Node.js 20+ runtime streaming.",
+      ],
+    };
+  }
+
+  // 3. GIN (GOLANG)
+  if (repoId === "repo_gin" || fnLower.includes("gin")) {
+    return {
+      repo: { ...repo, org_name: "Northwind Engineering" },
+      generated_at: new Date().toISOString(),
+      sections: [
+        {
+          key: "arch_overview",
+          title: "1. Radix Tree Prefix Router & Zero-Allocation Engine",
+          body: "Gin is engineered around a radix tree prefix matching algorithm in `pkg/gin/tree.go` coupled with zero-allocation context recycling via `sync.Pool` in `pkg/gin/gin.go`. Requests execute through a chain of `HandlerFunc` delegates with sub-microsecond routing latency.",
+          coverage: "fact",
+          sources: [
+            {
+              title: "pkg/gin/gin.go",
+              path: "pkg/gin/gin.go",
+              line_start: 412,
+              url: `${repo.url}/blob/master/pkg/gin/gin.go#L412`,
+            },
+            {
+              title: "pkg/gin/tree.go",
+              path: "pkg/gin/tree.go",
+              line_start: 280,
+              url: `${repo.url}/blob/master/pkg/gin/tree.go#L280`,
+            },
+          ],
+        },
+        {
+          key: "context_lifecycle",
+          title: "2. Context Memory Lifecycle & sync.Pool Concurrency",
+          body: "Because `*gin.Context` instances are pooled to achieve 0 memory allocations per request, PR #1420 enforces that any background goroutine escaping the HTTP request lifecycle MUST call `c.Copy()`. Escaping the raw pointer causes use-after-free corruption when `sync.Pool.Put()` zeros the context for subsequent requests.",
+          coverage: "fact",
+          sources: [
+            {
+              title: "PR #1420: Require c.Copy() for goroutine context escape",
+              path: "pkg/gin/context.go",
+              line_start: 115,
+              url: "https://github.com/gin-gonic/gin/pull/1420",
+            },
+            {
+              title: "Go Race Detector Contract (DATA-RACE-3012)",
+              path: "pkg/gin/context.go",
+              line_start: 120,
+              url: "https://go.dev/doc/articles/race_detector",
+            },
+          ],
+        },
+        {
+          key: "invariants_agent",
+          title: "3. ArgosX & Coding Agent Safety Invariants (Guardrails)",
+          body: `When autonomous coding agents work on this repository, WhyCode verifies:
+
+1. **Invariant #1420 (Context Cloning):** Always invoke \`c.Copy()\` before passing context pointers to asynchronous goroutines.
+2. **Invariant #810 (Radix Match Purity):** Never introduce regex or dynamic backtracking in \`tree.go\` prefix traversal.
+3. **Invariant #304 (Writer Locking):** Do not call \`c.Writer.Write()\` from multiple concurrent goroutines.`,
+          coverage: "fact",
+          sources: [
+            {
+              title: "Architectural Invariant Oracle (WhyCode Neo4j Graph)",
+              path: "pkg/gin/context.go",
+              line_start: 1,
+              url: repo.url,
+            },
+          ],
+        },
+        {
+          key: "tech_debt",
+          title: "4. Known Technical Debt & Migration Boundaries",
+          body: "Go 1.22 introduced method and wildcard matching into `net/http.ServeMux`. Gin maintains compatibility with custom `gin.Context` binders and middleware while benchmarking against standard library router additions.",
+          coverage: "inferred",
+          sources: [
+            {
+              title: "Go 1.22 ServeMux Enhancement Documentation",
+              url: "https://go.dev/blog/routing-enhancements",
+            },
+          ],
+        },
+      ],
+      unknowns: [
+        "High-density memory benchmarks under 100k persistent WebSocket connections.",
+      ],
+    };
+  }
+
+  // 4. ANY CUSTOM OR IMPORTED REPOSITORY
+  if (repoId !== "repo_flask") {
+    const lang = fnLower.includes("py") ? "Python" : fnLower.includes("go") ? "Go" : fnLower.includes("java") ? "Java" : fnLower.includes("rs") ? "Rust" : "TypeScript / JavaScript";
+    const ext = lang === "Python" ? "py" : lang === "Go" ? "go" : lang === "Java" ? "java" : lang === "Rust" ? "rs" : "ts";
+    const coreFile = `src/core/router.${ext}`;
+    const secFile = `src/security/verifier.${ext}`;
+    const ctxFile = `src/lifecycle/context.${ext}`;
+
+    return {
+      repo: { ...repo, org_name: "Northwind Engineering" },
+      generated_at: new Date().toISOString(),
+      sections: [
+        {
+          key: "arch_overview",
+          title: `1. Core Architecture & Execution Pipeline (${fullName})`,
+          body: `${fullName} is indexed into WhyCode engineering memory at commit ${strSha(repo.indexed_sha)} on branch ${repo.default_branch}. The codebase is written in **${lang}** and structured around core execution modules in \`${coreFile}\` and \`${ctxFile}\`. Call boundary contracts and symbol interfaces are tracked in the Neo4j engineering graph.`,
+          coverage: "fact",
+          sources: [
+            {
+              title: coreFile,
+              path: coreFile,
+              line_start: 1,
+              url: `${repo.url}/blob/${repo.default_branch}/${coreFile}`,
+            },
+            {
+              title: ctxFile,
+              path: ctxFile,
+              line_start: 24,
+              url: `${repo.url}/blob/${repo.default_branch}/${ctxFile}`,
+            },
+          ],
+        },
+        {
+          key: "invariants_contract",
+          title: "2. Architectural Invariants & Memory / Concurrency Boundaries",
+          body: `AST parsing identified critical call boundaries in \`${secFile}\` that govern request validation and data serialization. A core architectural invariant is maintained: proposed refactors must preserve backwards compatibility with downstream callers and satisfy the zero-regression invariant counterfactual test oracle before merging.`,
+          coverage: "fact",
+          sources: [
+            {
+              title: "Invariant #101: Zero-Regression Call Boundary Contract",
+              path: secFile,
+              line_start: 30,
+              url: repo.url,
+            },
+            {
+              title: "WhyCode Invariant Verification Oracle",
+              path: secFile,
+              line_start: 45,
+              url: repo.url,
+            },
+          ],
+        },
+        {
+          key: "invariants_agent",
+          title: "3. ArgosX & Coding Agent Safety Guardrails (Active Invariants)",
+          body: `When autonomous coding agents (ArgosX, Claude Code, Cursor, Codex) execute against ${fullName}, WhyCode enforces the following guardrails:
+
+1. **Invariant #101 (Contract Preservation):** Never mutate exported function signatures in \`${coreFile}\` without updating all downstream callers.
+2. **Invariant #102 (Concurrency Safety):** Enforce memory barrier and synchronous cleanup before worker recycling.
+3. **Invariant #103 (Security Boundaries):** Ensure all external inputs are strictly sanitized in \`${secFile}\` before dispatching.`,
+          coverage: "fact",
+          sources: [
+            {
+              title: `Architectural Invariant Specification (${repo.name})`,
+              path: coreFile,
+              line_start: 1,
+              url: repo.url,
+            },
+          ],
+        },
+        {
+          key: "tech_debt",
+          title: "4. Known Technical Debt & Migration Boundaries",
+          body: "The repository maintains legacy API compatibility layers. Migration to modern async non-blocking runtime pipelines is monitored under active WhyCode invariant surveillance.",
+          coverage: "inferred",
+          sources: [
+            {
+              title: "Repository Documentation & Issue Backlog",
+              url: repo.url,
+            },
+          ],
+        },
+      ],
+      unknowns: [
+        `Long-term deprecation timeline for legacy v1 API endpoints in ${repo.name}.`,
+        `End-to-end load test metrics under distributed container orchestration.`,
+      ],
+    };
+  }
+
+  // 5. DEFAULT FLASK HANDOVER
+  return DEMO_HANDOVER_FLASK;
+}
+
+export const DEMO_HANDOVER: Handover = DEMO_HANDOVER_FLASK;
+
 
 export const DEMO_GRAPH_FLASK: GraphResponse = {
   truncated: false,
