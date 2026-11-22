@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "whycode": {
+      "command": "python",
+      "args": ["-m", "backend.app.mcp"],
+      "env": {
+        "WHYCODE_API_URL": "https://why-code-like-this.onrender.com/api"
+      }
+    }
+  }
+}

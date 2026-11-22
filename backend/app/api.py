@@ -65,6 +65,7 @@ from .retrieval import (
 from .services import agent as agent_service
 from .services import graph as graph_service
 from .services import handover as handover_service
+from .mcp import handle_jsonrpc, TOOLS, SERVER_INFO
 
 router = APIRouter(prefix="/api")
 
@@ -873,5 +874,55 @@ def verify_invariant(payload: dict[str, Any]) -> dict[str, Any]:
             else "Contract broken: Invariant verification failed. Regression detected in downstream callers."
         ),
     }
+
+
+@router.post("/mcp")
+async def mcp_endpoint(request: Request) -> Any:
+    """Handle incoming Model Context Protocol (MCP) JSON-RPC 2.0 messages from AI coding agents."""
+    try:
+        body = await request.json()
+    except Exception:
+        return {"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error: Invalid JSON"}}
+    return handle_jsonrpc(body)
+
+
+@router.get("/mcp")
+def mcp_capabilities() -> dict[str, Any]:
+    """Expose MCP server metadata and available tools for Claude Code, Cursor, and Windsurf."""
+    return {
+        "status": "online",
+        "server": SERVER_INFO,
+        "tools": TOOLS,
+        "instructions": (
+            "To connect Claude Code or Cursor to WhyCode, add the WhyCode MCP server to your "
+            "claude_desktop_config.json or .cursor/mcp.json."
+        ),
+    }
+
+
+@router.get("/mcp/config")
+def mcp_client_config() -> dict[str, Any]:
+    """Return pre-configured MCP client configs for Claude Code, Cursor, and Windsurf."""
+    return {
+        "claude_desktop": {
+            "mcpServers": {
+                "whycode": {
+                    "command": "python",
+                    "args": ["-m", "backend.app.mcp"],
+                    "env": {
+                        "WHYCODE_API_URL": "https://why-code-like-this.onrender.com/api"
+                    }
+                }
+            }
+        },
+        "cursor_remote": {
+            "mcpServers": {
+                "whycode": {
+                    "url": "https://why-code-like-this.onrender.com/api/mcp"
+                }
+            }
+        }
+    }
+
 
 

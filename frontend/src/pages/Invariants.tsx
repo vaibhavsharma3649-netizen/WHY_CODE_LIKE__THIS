@@ -412,6 +412,7 @@ export function Invariants() {
   const [sandboxRunning, setSandboxRunning] = useState(false);
   const [sandboxOutput, setSandboxOutput] = useState<"idle" | "exploited" | "patched">("idle");
   const [copied, setCopied] = useState(false);
+  const [copiedConfig, setCopiedConfig] = useState(false);
 
   const handleRunCounterfactual = () => {
     setTestPhase("running");
@@ -870,6 +871,41 @@ def probe_exploit_session_signature_forgery():
                     </button>
                   </div>
                   <pre className="code-pre mono">{selectedScenario.mcp_payload}</pre>
+                </div>
+
+                <div className="code-editor-box" style={{ marginTop: 14 }}>
+                  <div className="code-editor-head">
+                    <Terminal size={13} />
+                    <span>Claude Desktop & Cursor Config (claude_desktop_config.json)</span>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-xs copy-btn"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(`{\n  "mcpServers": {\n    "whycode": {\n      "command": "python",\n      "args": ["-m", "backend.app.mcp"],\n      "env": {\n        "WHYCODE_API_URL": "https://why-code-like-this.onrender.com/api"\n      }\n    }\n  }\n}`);
+                        setCopiedConfig(true);
+                        setTimeout(() => setCopiedConfig(false), 1500);
+                      }}
+                    >
+                      <Copy size={11} /> {copiedConfig ? "Copied!" : "Copy MCP Config"}
+                    </button>
+                  </div>
+                  <pre className="code-pre mono">{`{
+  "mcpServers": {
+    "whycode": {
+      "command": "python",
+      "args": ["-m", "backend.app.mcp"],
+      "env": {
+        "WHYCODE_API_URL": "https://why-code-like-this.onrender.com/api"
+      }
+    }
+  }
+}`}</pre>
+                </div>
+
+                <div style={{ marginTop: 12, padding: "8px 12px", background: "rgba(0,0,0,0.03)", borderRadius: 6, fontSize: 13 }}>
+                  💡 <strong>Remote MCP Endpoint:</strong> <code>https://why-code-like-this.onrender.com/api/mcp</code>
+                  <br />
+                  <span>Tools: <code>whycode_check_invariants</code>, <code>whycode_verify_change_invariants</code>, <code>whycode_simulate_blast_radius</code>, <code>whycode_query_decisions</code></span>
                 </div>
               </div>
             )}
